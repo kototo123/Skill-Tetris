@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: hexa-clash
+    runtime: docker
+    plan: free
+    healthCheckPath: /health

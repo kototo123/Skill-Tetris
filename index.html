@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hexa Clash · 海克斯方块乱斗</title>
+  <style>
+    :root { --bg: #10131b; --panel: #171c27; --line: #2a3446; --text: #f3f6fb; --muted: #8894a8; --cyan: #39d9e6; --pink: #ff5b8d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: var(--text); background: radial-gradient(circle at 50% -10%, #263044 0, #10131b 52%); font: 14px/1.4 system-ui, sans-serif; }
+    .app { width: min(1180px, 100%); margin: auto; padding: 26px 22px 42px; }
+    header { display: flex; align-items: end; justify-content: space-between; margin-bottom: 20px; }
+    h1 { margin: 0; letter-spacing: .04em; font-size: clamp(24px, 4vw, 42px); }
+    .eyebrow { color: var(--cyan); letter-spacing: .18em; text-transform: uppercase; font-size: 11px; font-weight: 800; }
+    .status { color: var(--muted); text-align: right; }
+    .arena { display: grid; grid-template-columns: 1fr 260px 1fr; gap: 18px; align-items: start; }
+    .player { background: rgba(23,28,39,.88); border: 1px solid var(--line); padding: 16px; box-shadow: 0 16px 40px rgba(0,0,0,.2); }
+    .player-head { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; }
+    .player-name { font-weight: 800; font-size: 16px; }
+    .player-tag { color: var(--muted); font-size: 12px; }
+    .board { --cols: 10; --rows: 20; display: grid; grid-template-columns: repeat(var(--cols), 1fr); aspect-ratio: 1 / 2; border: 2px solid #354157; background: #0b0e14; gap: 1px; padding: 3px; }
+    .cell { min-width: 0; background: #111722; border-radius: 2px; }
+    .cell.filled { box-shadow: inset 0 2px rgba(255,255,255,.25), 0 0 9px rgba(255,255,255,.12); }
+    .cell.cyan { background:#37d8e7 } .cell.yellow { background:#f5c84b } .cell.purple { background:#b57cff } .cell.orange { background:#ff9a4d } .cell.blue { background:#5687ff } .cell.green { background:#5ed387 } .cell.red { background:#ff647e } .cell.garbage { background:#586273 }
+    .meter { margin-top: 12px; } .meter-line { display:flex; justify-content:space-between; color:var(--muted); font-size:12px; margin-bottom:5px; }
+    .meter-bar { height: 8px; background:#0d1119; border:1px solid #293346; } .meter-fill { height:100%; background:linear-gradient(90deg,var(--cyan),#8df2da); transition:width .2s; }
+    .skills { display:grid; gap:9px; margin-top:12px; } .skill { border:1px solid #334159; background:#1c2534; color:var(--text); padding:10px; text-align:left; cursor:pointer; } .skill:hover:not(:disabled) { border-color:var(--cyan); transform:translateY(-1px); } .skill:disabled { opacity:.42; cursor:not-allowed; } .skill strong { display:block; } .skill small { color:var(--muted); }
+    .center { display:flex; flex-direction:column; gap:14px; } .versus { text-align:center; font-size:32px; font-weight:900; color:var(--pink); letter-spacing:.08em; } .center-panel { border:1px solid var(--line); background:rgba(23,28,39,.72); padding:14px; } .center-panel h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; color:var(--muted); letter-spacing:.12em; }
+    .next { display:flex; gap:6px; min-height:50px; align-items:center; } .next .mini { width:17px; height:17px; background:#263145; border-radius:2px; } .next .mini.on { background:var(--cyan); }
+    .controls { color:var(--muted); font-size:12px; } .controls kbd { color:var(--text); border:1px solid #3b475d; padding:1px 5px; background:#111722; }
+    .mobile-controls { display:none; grid-template-columns:repeat(4, 1fr); gap:6px; margin-top:9px; }
+    .mobile-controls button { min-height:40px; border:1px solid #3a475d; background:#202a3b; color:var(--text); font-size:18px; font-weight:700; touch-action:manipulation; }
+    .mobile-controls button:active { background:#354a66; transform:translateY(1px); }
+    .mobile-controls .wide { grid-column:span 2; }
+    .online-panel { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 18px; padding:10px 12px; border:1px solid var(--line); background:rgba(23,28,39,.72); }
+    .online-panel input { width:110px; border:1px solid #3a475d; background:#0f141d; color:var(--text); padding:9px 10px; text-transform:uppercase; }
+    .online-panel button { border:1px solid #3a475d; background:#202a3b; color:var(--text); padding:9px 12px; cursor:pointer; }
+    .online-panel button.primary { background:var(--cyan); color:#081218; border-color:var(--cyan); font-weight:800; }
+    .online-status { color:var(--muted); font-size:12px; margin-left:auto; }
+    .log { min-height:96px; max-height:130px; overflow:auto; color:#aeb8c9; font-size:12px; } .log p { margin: 0 0 7px; } .log b { color:var(--cyan); }
+    .overlay { position:fixed; inset:0; display:none; place-items:center; background:rgba(8,10,15,.76); z-index:5; } .overlay.show { display:grid; } .modal { background:#1a2230; border:1px solid #46536b; padding:32px; text-align:center; width:min(360px, calc(100% - 32px)); } .modal h2 { margin-top:0; font-size:28px; } button#restart { border:0; padding:11px 20px; color:#081218; background:var(--cyan); font-weight:800; cursor:pointer; }
+    @media (max-width: 880px) { .arena { grid-template-columns: 1fr 1fr; } .center { grid-column:1 / -1; grid-row:1; display:grid; grid-template-columns:1fr 1fr; } .versus { grid-column:1 / -1; } .center-panel:last-child { grid-column:1 / -1; } }
+    @media (max-width: 560px) {
+      .app { padding: 14px 9px 28px; }
+      header { align-items:flex-start; gap:8px; }
+      h1 { font-size:25px; }
+      .status { font-size:11px; max-width:120px; }
+      .arena { display:flex; flex-direction:column; gap:10px; }
+      .center { order:-1; width:100%; display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+      .center .versus { grid-column:1 / -1; font-size:24px; }
+      .center-panel { padding:10px; }
+      .center-panel:last-child { display:none; }
+      .player { width:100%; padding:10px; }
+      .board { width:min(58vw, 230px); margin:auto; }
+      .player-head { margin-bottom:8px; }
+      .skills { grid-template-columns:1fr 1fr; gap:6px; }
+      .skill { padding:9px 7px; min-height:62px; font-size:11px; }
+      .skill strong { font-size:12px; }
+      .mobile-controls { display:grid; }
+      .controls { display:none; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header><div><div class="eyebrow">prototype / season 01</div><h1>海克斯方块乱斗</h1></div><div class="status" id="status">准备开始 · 先手保护 3 秒</div></header>
+    <div class="online-panel"><strong>在线对战</strong><button class="primary" id="create-room">创建房间</button><input id="room-code" maxlength="5" placeholder="邀请码" aria-label="邀请码" /><button id="join-room">加入房间</button><button id="ready-room">准备</button><span class="online-status" id="online-status">未连接 · 可单机练习</span></div>
+    <section class="arena">
+      <section class="player" id="panel-a"><div class="player-head"><div><div class="player-name">玩家 1</div><div class="player-tag">方向键 / 触控</div></div><div id="score-a">0 pts</div></div><div class="board" id="board-a"></div><div class="mobile-controls" data-player="a"><button data-action="left" aria-label="玩家1左移">←</button><button data-action="rotate" aria-label="玩家1旋转">↻</button><button data-action="right" aria-label="玩家1右移">→</button><button data-action="drop" aria-label="玩家1加速">↓</button><button class="wide" data-action="hard" aria-label="玩家1硬降">硬降</button></div><div class="meter"><div class="meter-line"><span>海克斯能量</span><span id="energy-a">0 / 100</span></div><div class="meter-bar"><div class="meter-fill" id="fill-a"></div></div></div><div class="skills"><button class="skill" data-player="a" data-skill="strike"><strong>⚡ 电弧轰击 · 20</strong><small>向对手发送 2 行垃圾</small></button><button class="skill" data-player="a" data-skill="shield"><strong>◇ 棱镜护盾 · 10</strong><small>抵消下一次攻击</small></button></div></section>
+      <aside class="center"><div class="versus">VS</div><div class="center-panel"><h2>下一个方块</h2><div class="next" id="next-a"></div><div class="next" id="next-b"></div></div><div class="center-panel"><h2>战况记录</h2><div class="log" id="log"></div></div><div class="center-panel controls"><h2>操作</h2><div><kbd>←</kbd> <kbd>→</kbd> 移动　<kbd>↑</kbd> 旋转　<kbd>↓</kbd> 加速　<kbd>空格</kbd> 硬降</div><div style="margin-top:7px">玩家 2：<kbd>A</kbd> <kbd>D</kbd> <kbd>W</kbd> <kbd>S</kbd> <kbd>Shift</kbd></div></div></aside>
+      <section class="player" id="panel-b"><div class="player-head"><div><div class="player-name">玩家 2</div><div class="player-tag">WASD / 触控</div></div><div id="score-b">0 pts</div></div><div class="board" id="board-b"></div><div class="mobile-controls" data-player="b"><button data-action="left" aria-label="玩家2左移">←</button><button data-action="rotate" aria-label="玩家2旋转">↻</button><button data-action="right" aria-label="玩家2右移">→</button><button data-action="drop" aria-label="玩家2加速">↓</button><button class="wide" data-action="hard" aria-label="玩家2硬降">硬降</button></div><div class="meter"><div class="meter-line"><span>海克斯能量</span><span id="energy-b">0 / 100</span></div><div class="meter-bar"><div class="meter-fill" id="fill-b"></div></div></div><div class="skills"><button class="skill" data-player="b" data-skill="strike"><strong>⚡ 电弧轰击 · 20</strong><small>向对手发送 2 行垃圾</small></button><button class="skill" data-player="b" data-skill="shield"><strong>◇ 棱镜护盾 · 10</strong><small>抵消下一次攻击</small></button></div></section>
+    </section>
+  </main>
+  <div class="overlay" id="overlay"><div class="modal"><div class="eyebrow">match complete</div><h2 id="winner">玩家 1 获胜</h2><p id="final-score"></p><button id="restart">再来一局</button></div></div>
+  <script src="game.js"></script><script src="client-network.js"></script>
+  <script>
+    const { Player, collides, addGarbageLines } = HexGame;
+    const network = new MatchClient({ onStatus: value => document.getElementById('online-status').textContent = value, onEvent: event => {
+      if (event.type === 'room') { document.getElementById('room-code').value = event.room.code; log(`<b>房间</b> ${event.room.code} · ${event.room.status}`); }
+      if (event.type === 'error') log(`<b>网络</b> ${event.code}`);
+    }});
+    const serverUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
+    document.getElementById('create-room').onclick = () => { network.connect(serverUrl); setTimeout(() => network.create(), 150); };
+    document.getElementById('join-room').onclick = () => { network.connect(serverUrl); setTimeout(() => network.join(document.getElementById('room-code').value), 150); };
+    document.getElementById('ready-room').onclick = () => network.ready();
+    const players = { a: new Player('玩家 1', 'cyan'), b: new Player('玩家 2', 'pink') };
+    // Test mode: keep player 2 slow so mobile controls and skill effects are easier to inspect.
+    players.b.dropInterval = 6000;
+    const opponent = key => key === 'a' ? players.b : players.a;
+    const boardEl = key => document.querySelector('#board-' + key);
+    const logEl = document.querySelector('#log');
+    const keyMap = { ArrowLeft: ['a', -1], ArrowRight: ['a', 1], ArrowUp: ['a', 'rotate'], ArrowDown: ['a', 'drop'], ' ': ['a', 'hard'], a: ['b', -1], d: ['b', 1], w: ['b', 'rotate'], s: ['b', 'drop'], Shift: ['b', 'hard'] };
+    function log(message) { const p = document.createElement('p'); p.innerHTML = message; logEl.prepend(p); while (logEl.children.length > 8) logEl.lastChild.remove(); }
+    function paintBoard(key) {
+      const p = players[key]; const el = boardEl(key); const cells = p.board.map(row => row.slice());
+      p.current.cells.forEach((row, dy) => row.forEach((cell, dx) => { if (cell && p.y + dy >= 0 && cells[p.y + dy]) cells[p.y + dy][p.x + dx] = p.current.color; }));
+      el.innerHTML = cells.flat().map(value => `<div class="cell ${value ? 'filled ' + (value === 8 ? 'garbage' : value) : ''}"></div>`).join('');
+      document.querySelector('#score-' + key).textContent = `${p.score} pts`;
+      document.querySelector('#energy-' + key).textContent = `${p.energy} / 100`;
+      document.querySelector('#fill-' + key).style.width = `${p.energy}%`;
+      document.querySelectorAll(`.skill[data-player="${key}"]`).forEach(btn => btn.disabled = p.energy < Number(btn.dataset.skill === 'strike' ? 20 : 10) || !p.alive);
+      const next = document.querySelector('#next-' + key); next.innerHTML = p.next.cells.flat().map(value => `<div class="mini ${value ? 'on' : ''}"></div>`).join('');
+    }
+    function attack(key) { const from = players[key], to = opponent(key); if (to.shield) { to.shield = false; log(`<b>${to.name}</b> 的棱镜护盾挡住了攻击`); return; } to.board = addGarbageLines(to.board, 2); log(`<b>${from.name}</b> 释放电弧轰击，发送 2 行垃圾`); }
+    function useSkill(key, skill) { const p = players[key]; const cost = skill === 'strike' ? 20 : 10; if (p.energy < cost || !p.alive) return; p.energy -= cost; if (skill === 'strike') attack(key); else { p.shield = true; log(`<b>${p.name}</b> 开启棱镜护盾`); } render(); }
+    document.querySelectorAll('.skill').forEach(btn => btn.addEventListener('click', () => useSkill(btn.dataset.player, btn.dataset.skill)));
+    document.querySelectorAll('.mobile-controls button').forEach(btn => {
+      const run = () => { const key = btn.parentElement.dataset.player; const action = btn.dataset.action; const p = players[key]; if (!p.alive) return; if (action === 'left') p.move(-1); if (action === 'right') p.move(1); if (action === 'rotate') p.rotate(); if (action === 'drop') p.softDrop(); if (action === 'hard') p.hardDrop(); render(); };
+      btn.addEventListener('click', run);
+      btn.addEventListener('touchstart', event => { event.preventDefault(); run(); }, { passive:false });
+    });
+    document.addEventListener('keydown', event => { const action = keyMap[event.key]; if (!action) return; event.preventDefault(); const [key, move] = action; const p = players[key]; if (!p.alive) return; if (move === 'rotate') p.rotate(); else if (move === 'drop') p.softDrop(); else if (move === 'hard') p.hardDrop(); else p.move(move); network.command({ type: move === 'rotate' ? 'rotate' : move === 'hard' ? 'hardDrop' : move === 'drop' ? 'softDrop' : 'move', direction: typeof move === 'number' ? move : undefined }); render(); });
+    function render() { paintBoard('a'); paintBoard('b'); }
+    let last = performance.now();
+    function loop(now) { const delta = now - last; last = now; Object.values(players).forEach(p => { if (p.alive) { p.lastDrop += delta; if (p.lastDrop > p.dropInterval) { p.lastDrop = 0; if (!p.softDrop()) { const lines = p.lock(); if (lines) log(`<b>${p.name}</b> 消除了 ${lines} 行，能量上涨`); } } } }); if (!players.a.alive || !players.b.alive) finish(players.a.alive ? '玩家 1' : '玩家 2'); render(); if (!document.getElementById('overlay').classList.contains('show')) requestAnimationFrame(loop); }
+    let ended = false; function finish(winner) { if (ended) return; ended = true; document.getElementById('winner').textContent = `${winner} 获胜`; document.getElementById('final-score').textContent = `最终比分：${players.a.score} : ${players.b.score}`; document.getElementById('overlay').classList.add('show'); }
+    document.getElementById('restart').onclick = () => location.reload();
+    log('<b>系统</b> 对战开始，先手保护结束后可释放技能'); render(); requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
