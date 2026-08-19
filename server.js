@@ -62,11 +62,12 @@ class RoomManager {
     if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
     const command = { seq: room.seq + 1, playerId, payload, at: Date.now() };
     if (payload.type === 'skill') {
-      const skillCost = payload.skill === 'strike' ? 20 : payload.skill === 'shield' ? 10 : 0;
+      const skillCost = payload.skill === 'strike' ? 20 : payload.skill === 'shield' || payload.skill === 'cleanse' ? 10 : 0;
       const attacker = room.states.get(playerId) || {};
       if (!skillCost || (attacker.energy || 0) < skillCost) throw new Error('INSUFFICIENT_ENERGY');
       attacker.energy -= skillCost;
       attacker.shield = payload.skill === 'shield';
+      if (payload.skill === 'cleanse') attacker.cleanse = true;
       const opponentId = room.players.find(id => id !== playerId);
       let blocked = false;
       if (opponentId && payload.skill === 'strike') {
@@ -74,7 +75,7 @@ class RoomManager {
         if (opponent.shield) { opponent.shield = false; blocked = true; }
         room.states.set(opponentId, opponent);
       }
-      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost, blocked, garbageLines: payload.skill === 'strike' && !blocked ? 2 : 0 };
+      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost, blocked, garbageLines: payload.skill === 'strike' && !blocked ? 2 : 0, cleanse: payload.skill === 'cleanse' ? 2 : 0 };
       room.states.set(playerId, attacker);
     }
     room.seq = command.seq;

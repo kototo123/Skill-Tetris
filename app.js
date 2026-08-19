@@ -158,6 +158,10 @@ const network = new MatchClient({
         players.a.board = addGarbageLines(players.a.board, event.effect.garbageLines);
         paint('a');
       }
+      if (event.effect?.targetId === selfId && event.effect.cleanse > 0) {
+        players.a.board = cleanseBoard(players.a.board, event.effect.cleanse);
+        paint('a');
+      }
       if (event.effect?.blocked) log('护盾抵挡了这次攻击');
     }
     if (event.type === 'command' && event.payload?.type === 'skill') {
@@ -260,7 +264,7 @@ document.querySelectorAll('.controls button').forEach(button => {
 });
 
 document.querySelectorAll('.skill').forEach(button => {
-  button.onclick = () => {
+  bindTapSkill(button, () => {
     const key = button.dataset.player;
     if (online && key !== 'a') return;
     if (online && (roomStatus !== 'playing' || matchEnded)) return;
@@ -269,13 +273,28 @@ document.querySelectorAll('.skill').forEach(button => {
     if (player.energy < cost) return;
     player.energy -= cost;
     if (button.dataset.skill === 'shield') player.shield = true;
+    if (button.dataset.skill === 'cleanse') player.board = cleanseBoard(player.board, 2);
     if (online) {
-      network.state(stateOf(player));
       network.command({ type: 'skill', skill: button.dataset.skill });
     }
     paint('a'); paint('b');
-  };
+  });
 });
+
+function bindTapSkill(button, action) {
+  let lastTouch = 0;
+  button.onclick = event => { if (Date.now() - lastTouch < 500) return; event.preventDefault(); action(); };
+  button.ontouchend = event => { event.preventDefault(); lastTouch = Date.now(); action(); };
+}
+
+function cleanseBoard(board, count) {
+  const rows = board.map(row => row.slice());
+  let removed = 0;
+  for (let index = rows.length - 1; index >= 0 && removed < count; index -= 1) {
+    if (rows[index].some(cell => cell === 8)) { rows.splice(index, 1); rows.unshift(Array(10).fill(0)); removed += 1; }
+  }
+  return rows;
+}
 
 function stateOf(player) {
   return {

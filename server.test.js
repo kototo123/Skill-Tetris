@@ -277,4 +277,15 @@ test('notifies the remaining player when the opponent disconnects', async () => 
   await new Promise(resolve => httpServer.close(resolve));
 });
 
+test('accepts cleanse as a real low-cost skill', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  manager.updateState(room.code, 'host', { energy: 10 });
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
+  assert.equal(command.effect.cleanse, 2);
+  assert.equal(room.states.get('host').energy, 0);
+});
+
 console.log('server room tests passed');
