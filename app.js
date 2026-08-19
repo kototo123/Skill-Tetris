@@ -11,6 +11,7 @@ let matchStarted = false;
 let matchEnded = false;
 let countdownRunning = false;
 let lastStateSent = 0;
+let skillSyncPauseUntil = 0;
 let hiddenAt = 0;
 let roomStatus = 'waiting';
 const logEl = document.querySelector('#log');
@@ -156,6 +157,10 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill') {
       const name = event.payload.skill === 'jam' ? '干扰锁定' : event.payload.skill === 'reverse' ? '反向操控' : event.payload.skill === 'cleanse' ? '净化' : '棱镜护盾';
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
+      if (event.playerId === selfId && Number.isFinite(event.effect?.energy)) {
+        players.a.energy = event.effect.energy;
+        paint('a');
+      }
       if (event.effect?.targetId === selfId && event.effect.garbageLines > 0) {
         players.a.board = addGarbageLines(players.a.board, event.effect.garbageLines);
         paint('a');
@@ -179,7 +184,7 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill') {
       animateSkill(event.payload.skill, event.playerId);
     }
-    if (event.type === 'error') log(`network error: ${event.code}`);
+    if (event.type === 'error') log(`技能/网络错误: ${event.code}`);
     if (event.disconnectedId && event.disconnectedId !== selfId) log('对手已离线');
   }
 });
@@ -289,6 +294,7 @@ document.querySelectorAll('.skill').forEach(button => {
     if (button.dataset.skill === 'cleanse') player.board = cleanseBoard(player.board, 2);
     if (online) {
       network.command({ type: 'skill', skill: button.dataset.skill });
+      skillSyncPauseUntil = performance.now() + 500;
     }
     paint('a'); paint('b');
   });
@@ -333,7 +339,7 @@ function loop(now) {
     }
   });
   if (online && matchStarted && !matchEnded && !players.a.alive) finishMatch('你输了');
-  if (online && matchStarted && now - lastStateSent >= 100) {
+  if (online && matchStarted && now >= skillSyncPauseUntil && now - lastStateSent >= 100) {
     lastStateSent = now;
     network.state(stateOf(players.a));
   }

@@ -82,7 +82,16 @@ class RoomManager {
         else opponent.reversed = true;
         room.states.set(opponentId, opponent);
       }
-      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost, blocked, jammed: payload.skill === 'jam' && !blocked, reversed: payload.skill === 'reverse' && !blocked, cleanse: payload.skill === 'cleanse' ? 2 : 0 };
+      command.effect = {
+        skill: payload.skill,
+        targetId: payload.skill === 'cleanse' || payload.skill === 'shield' ? playerId : opponentId,
+        cost: skillCost,
+        energy: attacker.energy,
+        blocked,
+        jammed: payload.skill === 'jam' && !blocked,
+        reversed: payload.skill === 'reverse' && !blocked,
+        cleanse: payload.skill === 'cleanse' ? 2 : 0
+      };
       room.states.set(playerId, attacker);
     }
     room.seq = command.seq;
@@ -98,11 +107,9 @@ class RoomManager {
     const nextBoard = Array.isArray(state?.board) ? state.board : previous.board;
     room.states.set(playerId, {
       score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
-      // Energy is server-owned for skill costs. Clients may report gains from
-      // cleared lines, but cannot race a skill command by writing a lower value.
-      energy: Number.isFinite(state?.energy)
-        ? Math.max(previous.energy || 0, Math.max(0, Math.min(100, state.energy)))
-        : previous.energy || 0,
+      // State snapshots report energy earned by clearing lines. Skill spending
+      // is applied separately by recordCommand.
+      energy: Number.isFinite(state?.energy) ? Math.max(previous.energy || 0, Math.max(0, Math.min(100, state.energy))) : previous.energy || 0,
       alive: state?.alive !== false,
       shield: previous.shield === true,
       jammed: state?.jammed === true,

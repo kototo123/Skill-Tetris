@@ -238,7 +238,8 @@ test('blocks commands outside active play and reports jam target', () => {
   manager.updateState(room.code, 'guest', { energy: 10 });
   manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'shield' });
   const blocked = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
-  assert.equal(blocked.effect.jammed, true);
+  assert.equal(blocked.effect.blocked, true);
+  assert.equal(blocked.effect.jammed, false);
   assert.equal(blocked.effect.targetId, 'guest');
   room.status = 'finished';
   assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'hardDrop' }), /MATCH_NOT_PLAYING/);
@@ -301,5 +302,17 @@ test('accepts reverse as a low-cost attack and marks the opponent', () => {
   assert.equal(room.states.get('host').energy, 0);
   assert.equal(room.states.get('guest').reversed, true);
 });
+
+test('targets cleanse at the caster and returns authoritative energy', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  manager.updateState(room.code, 'host', { energy: 10 });
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
+  assert.equal(command.effect.targetId, 'host');
+  assert.equal(command.effect.energy, 0);
+});
+
 
 console.log('server room tests passed');
