@@ -169,10 +169,24 @@ const network = new MatchClient({
 });
 
 const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
-document.querySelector('#create-room').onclick = () => { network.connect(wsUrl); network.create(); };
-document.querySelector('#join-room').onclick = () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); };
-document.querySelector('#ready-room').onclick = () => network.ready();
-document.querySelector('#start-room').onclick = () => network.start();
+function bindTap(selector, action) {
+  const button = document.querySelector(selector);
+  let lastTap = 0;
+  const trigger = event => {
+    event?.preventDefault();
+    const now = Date.now();
+    if (now - lastTap < 150) return;
+    lastTap = now;
+    action();
+  };
+  button.addEventListener('pointerdown', trigger, { passive: false });
+  button.addEventListener('touchstart', trigger, { passive: false });
+  button.addEventListener('click', trigger);
+}
+bindTap('#create-room', () => { network.connect(wsUrl); network.create(); });
+bindTap('#join-room', () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); });
+bindTap('#ready-room', () => network.ready());
+bindTap('#start-room', () => network.start());
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = performance.now(); return; }
