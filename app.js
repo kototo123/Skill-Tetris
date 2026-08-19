@@ -10,6 +10,7 @@ let hostId = '';
 let matchStarted = false;
 let matchEnded = false;
 let remoteDropClock = 0;
+let countdownRunning = false;
 let lastStateSent = 0;
 const logEl = document.querySelector('#log');
 
@@ -60,6 +61,8 @@ function setOnlineControls() {
 }
 
 function runCountdown(seconds = 3) {
+  if (countdownRunning) return;
+  countdownRunning = true;
   resetMatch();
   const overlay = document.querySelector('#countdown');
   overlay.hidden = false;
@@ -72,7 +75,7 @@ function runCountdown(seconds = 3) {
     else {
       clearInterval(timer);
       overlay.textContent = 'GO';
-      setTimeout(() => { overlay.hidden = true; overlay.style.display = 'none'; matchStarted = true; }, 450);
+      setTimeout(() => { overlay.hidden = true; overlay.style.display = 'none'; countdownRunning = false; matchStarted = true; }, 450);
     }
   }, 1000);
 }
@@ -109,6 +112,7 @@ const network = new MatchClient({
       hostId = event.room.players[0]?.playerId || '';
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
+      if (event.room.status === 'countdown') runCountdown(event.room.countdown || 3);
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
       if (event.room.status === 'playing') matchStarted = true;
