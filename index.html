@@ -26,7 +26,7 @@
       .player-head strong{font-size:11px}.player-head span{font-size:10px}
       .board{width:100%;height:auto;max-height:calc(100dvh - 245px);aspect-ratio:1/1.85;flex:0 1 auto;margin:0 auto;border-width:1px;padding:2px;gap:1px}
       .controls{flex:0 0 auto;grid-template-columns:repeat(4,1fr);gap:3px;margin-top:4px}
-      .controls button{min-height:36px;height:36px;font-size:16px;border-radius:4px;padding:0;touch-action:manipulation;user-select:none;-webkit-user-select:none}
+      .controls button{position:relative;z-index:30;min-height:40px;height:40px;font-size:16px;border-radius:4px;padding:0;touch-action:none;user-select:none;-webkit-user-select:none;pointer-events:auto}
       .controls .wide{grid-column:span 4;min-height:27px;height:27px;font-size:11px}
       .meter{flex:0 0 auto;margin-top:4px}.meter-line{font-size:9px;line-height:12px}.meter-bar{height:5px}
       .skills{flex:0 0 auto;grid-template-columns:1fr 1fr;gap:3px;margin-top:4px}

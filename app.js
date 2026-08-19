@@ -12,6 +12,7 @@ let matchEnded = false;
 let countdownRunning = false;
 let lastStateSent = 0;
 let hiddenAt = 0;
+let roomStatus = 'waiting';
 const logEl = document.querySelector('#log');
 
 function log(message) {
@@ -138,6 +139,7 @@ const network = new MatchClient({
       hostId = event.room.players[0]?.playerId || '';
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
+      roomStatus = event.room.status;
       if (event.room.status === 'countdown') { showCountdown(event.room.countdown || 3); runCountdown(event.room.countdown || 3); }
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
@@ -213,7 +215,8 @@ function commandFor(action) {
 
 function act(key, action) {
   if (online && key !== 'a') return;
-  if (online && (!matchStarted || matchEnded)) return;
+  if (online && roomStatus !== 'playing') { document.querySelector('#snapshot').textContent = '等待比赛开始'; return; }
+  if (online && matchEnded) return;
   const player = players[key];
   if (!player.alive) return;
   if (action === 'left') player.move(-1);
@@ -243,7 +246,7 @@ document.querySelectorAll('.skill').forEach(button => {
   button.onclick = () => {
     const key = button.dataset.player;
     if (online && key !== 'a') return;
-    if (online && (!matchStarted || matchEnded)) return;
+    if (online && (roomStatus !== 'playing' || matchEnded)) return;
     const player = players[key];
     const cost = button.dataset.skill === 'strike' ? 20 : 10;
     if (player.energy < cost) return;
