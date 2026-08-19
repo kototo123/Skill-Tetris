@@ -315,5 +315,17 @@ test('targets cleanse at the caster and returns authoritative energy', () => {
   assert.equal(command.effect.energy, 0);
 });
 
+test('cleanse removes active attack debuffs', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  manager.updateState(room.code, 'host', { energy: 20, jammed: true, reversed: true });
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
+  assert.equal(command.effect.targetId, 'host');
+  assert.equal(room.states.get('host').jammed, false);
+  assert.equal(room.states.get('host').reversed, false);
+});
+
 
 console.log('server room tests passed');

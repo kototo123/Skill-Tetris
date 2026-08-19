@@ -168,6 +168,8 @@ const network = new MatchClient({
       }
       if (event.effect?.targetId === selfId && event.effect.cleanse > 0) {
         players.a.board = cleanseBoard(players.a.board, event.effect.cleanse);
+        players.a.jammed = false;
+        players.a.reversed = false;
         paint('a');
       }
       if (event.effect?.targetId === selfId && event.effect?.jammed) {
@@ -294,18 +296,30 @@ function useSkill(button) {
       return;
     }
     player.energy -= cost;
+    let localBlocked = false;
     if (!online) {
       const opponent = key === 'a' ? players.b : players.a;
-      if (button.dataset.skill === 'jam') opponent.jammed = true;
-      if (button.dataset.skill === 'reverse') opponent.reversed = true;
+      const attack = button.dataset.skill === 'jam' || button.dataset.skill === 'reverse';
+      if (attack && opponent.shield) {
+        opponent.shield = false;
+        localBlocked = true;
+        log('护盾抵挡了这次攻击');
+      } else {
+        if (button.dataset.skill === 'jam') opponent.jammed = true;
+        if (button.dataset.skill === 'reverse') opponent.reversed = true;
+      }
     }
     if (button.dataset.skill === 'shield') player.shield = true;
-    if (button.dataset.skill === 'cleanse') player.board = cleanseBoard(player.board, 2);
+    if (button.dataset.skill === 'cleanse') {
+      player.board = cleanseBoard(player.board, 2);
+      player.jammed = false;
+      player.reversed = false;
+    }
     if (online) {
       network.command({ type: 'skill', skill: button.dataset.skill });
       skillSyncPauseUntil = performance.now() + 500;
     }
-    animateSkill(button.dataset.skill, online ? selfId : `local-${key}`);
+    if (!localBlocked) animateSkill(button.dataset.skill, online ? selfId : `local-${key}`);
     log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
     paint('a'); paint('b');
 }
