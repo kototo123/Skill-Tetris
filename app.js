@@ -31,7 +31,13 @@ function animateSkill(skill, actorId) {
   if (!target) return;
   const toast = document.querySelector('#skill-toast');
   const flash = document.querySelector('#screen-flash');
-  const label = skill === 'jam' ? (isSelf ? '干扰锁定！' : '对手锁定了你的方块') : skill === 'reverse' ? (isSelf ? '反向操控！' : '你的操作方向反了') : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
+  const label = skill === 'jam'
+    ? (isSelf ? '干扰锁定！' : '对手锁定了你的方块')
+    : skill === 'reverse'
+      ? (isSelf ? '反向操控！' : '你的操作方向反了')
+      : skill === 'cleanse'
+        ? (isSelf ? '净化启动' : '对手使用了净化')
+        : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
   toast.textContent = label;
   toast.classList.remove('show');
   flash.classList.remove('show');
@@ -42,9 +48,11 @@ function animateSkill(skill, actorId) {
   if (skill === 'jam' || skill === 'reverse') {
     target.classList.add(isSelf ? 'skill-cast' : 'skill-hit');
     flash.classList.add('show');
-  } else {
+  } else if (skill === 'shield') {
     target.classList.add('skill-shield');
     setTimeout(() => target.classList.remove('skill-shield'), 1800);
+  } else {
+    target.classList.add('skill-cast');
   }
   setTimeout(() => { target.classList.remove('skill-hit', 'skill-cast'); flash.classList.remove('show'); }, 700);
 }
