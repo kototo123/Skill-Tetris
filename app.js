@@ -6,6 +6,8 @@ players.b.dropInterval = 760;
 
 let online = false;
 let selfId = '';
+let hostId = '';
+let matchStarted = false;
 let lastStateSent = 0;
 const logEl = document.querySelector('#log');
 
@@ -38,16 +40,38 @@ function setOnlineControls() {
   document.querySelector('#status').textContent = online ? '左侧为自己，右侧为对手' : '本地练习';
 }
 
+function runCountdown(seconds = 3) {
+  const overlay = document.querySelector('#countdown');
+  overlay.hidden = false;
+  overlay.style.display = 'grid';
+  let value = seconds;
+  overlay.textContent = value;
+  const timer = setInterval(() => {
+    value -= 1;
+    if (value > 0) overlay.textContent = value;
+    else {
+      clearInterval(timer);
+      overlay.textContent = 'GO';
+      setTimeout(() => { overlay.hidden = true; overlay.style.display = 'none'; matchStarted = true; }, 450);
+    }
+  }, 1000);
+}
+
 const network = new MatchClient({
   onStatus: status => document.querySelector('#online-status').textContent = status,
   onEvent: event => {
     if (event.selfId) { selfId = event.selfId; online = true; setOnlineControls(); }
     if (event.room) {
+      hostId = event.room.players[0]?.playerId || '';
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
+      const startButton = document.querySelector('#start-room');
+      startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
+      if (event.room.status === 'playing') matchStarted = true;
       const opponent = event.room.players.find(player => player.playerId !== selfId);
       if (opponent) applyRemoteState(opponent.state);
     }
+    if (event.type === 'countdown') runCountdown(event.countdown || 3);
     if (event.type === 'error') log(`network error: ${event.code}`);
   }
 });
@@ -56,6 +80,7 @@ const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hos
 document.querySelector('#create-room').onclick = () => { network.connect(wsUrl); network.create(); };
 document.querySelector('#join-room').onclick = () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); };
 document.querySelector('#ready-room').onclick = () => network.ready();
+document.querySelector('#start-room').onclick = () => network.start();
 
 function paint(key) {
   const player = players[key];
@@ -86,6 +111,7 @@ function commandFor(action) {
 
 function act(key, action) {
   if (online && key !== 'a') return;
+  if (online && !matchStarted) return;
   const player = players[key];
   if (!player.alive) return;
   if (action === 'left') player.move(-1);
@@ -131,6 +157,7 @@ function loop(now) {
   lastFrame = now;
   const activeKeys = online ? ['a'] : ['a', 'b'];
   activeKeys.forEach(key => {
+    if (online && !matchStarted) return;
     const player = players[key];
     if (!player.alive) return;
     player.lastDrop += delta;
@@ -140,7 +167,7 @@ function loop(now) {
       paint(key);
     }
   });
-  if (online && now - lastStateSent >= 100) {
+  if (online && matchStarted && now - lastStateSent >= 100) {
     lastStateSent = now;
     network.state(stateOf(players.a));
   }

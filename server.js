@@ -16,7 +16,7 @@ class RoomManager {
   createRoom(playerId) {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
-    const room = { code, status: 'waiting', players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
+    const room = { code, hostId: playerId, status: 'waiting', countdown: 0, players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
     room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
     this.rooms.set(code, room);
     return room;
@@ -37,6 +37,15 @@ class RoomManager {
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
     room.ready.add(playerId);
     if (room.ready.size === 2) room.status = 'ready';
+    return room;
+  }
+
+  startRoom(code, playerId) {
+    const room = this.getRoom(code);
+    if (room.hostId !== playerId) throw new Error('ONLY_HOST');
+    if (room.players.length !== 2 || room.ready.size !== 2) throw new Error('NOT_READY');
+    room.status = 'countdown';
+    room.countdown = 3;
     return room;
   }
 
@@ -75,6 +84,7 @@ class RoomManager {
     return {
       code: room.code,
       status: room.status,
+      countdown: room.countdown,
       players: room.players.map(playerId => ({ playerId, ready: room.ready.has(playerId), connected: room.clients.has(playerId), state: room.states.get(playerId) || null })),
       seq: room.seq
     };
@@ -113,15 +123,27 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         else if (message.type === 'join') room = manager.joinRoom(message.code, playerId);
         else if (!room) throw new Error('NOT_IN_ROOM');
         else if (message.type === 'ready') room = manager.setReady(room.code, playerId);
+        else if (message.type === 'start') room = manager.startRoom(room.code, playerId);
         else if (message.type === 'command') manager.recordCommand(room.code, playerId, message.payload);
         else if (message.type === 'state') manager.updateState(room.code, playerId, message.state);
         else throw new Error('UNKNOWN_MESSAGE');
         if (room) {
           room.clients.set(playerId, socket);
-          const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : 'room', room: manager.snapshot(room.code), playerId, payload: message.payload };
+          const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : message.type === 'start' ? 'countdown' : 'room', room: manager.snapshot(room.code), playerId, countdown: message.type === 'start' ? 3 : undefined, payload: message.payload };
           room.clients.forEach((client, clientId) => {
             if (client.readyState === 1) client.send(JSON.stringify({ ...event, selfId: clientId }));
           });
+          if (message.type === 'start') {
+            setTimeout(() => {
+              if (room.status !== 'countdown') return;
+              room.status = 'playing';
+              room.countdown = 0;
+              const live = { type: 'room', room: manager.snapshot(room.code) };
+              room.clients.forEach((client, clientId) => {
+                if (client.readyState === 1) client.send(JSON.stringify({ ...live, selfId: clientId }));
+              });
+            }, 3000);
+          }
         }
       } catch (error) { send({ type: 'error', code: error.message }); }
     });

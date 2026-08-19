@@ -145,4 +145,16 @@ test('identifies each client and broadcasts the opponent active-piece snapshot',
   await new Promise(resolve => httpServer.close(resolve));
 });
 
+test('only the host can start a ready room and emits a three second countdown', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  manager.setReady(room.code, 'host');
+  manager.setReady(room.code, 'guest');
+  assert.throws(() => manager.startRoom(room.code, 'guest'), /ONLY_HOST/);
+  const started = manager.startRoom(room.code, 'host');
+  assert.equal(started.status, 'countdown');
+  assert.equal(started.countdown, 3);
+});
+
 console.log('server room tests passed');

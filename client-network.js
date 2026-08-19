@@ -35,6 +35,7 @@
     create() { this.send('create', {}, true); }
     join(code) { this.send('join', { code }, true); }
     ready() { if (this.roomCode) this.send('ready'); }
+    start() { if (this.roomCode) this.send('start'); }
     command(payload) { if (this.roomCode) this.send('command', { payload }); }
     state(state) { if (this.roomCode) this.send('state', { state }); }
   }
