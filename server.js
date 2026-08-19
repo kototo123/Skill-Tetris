@@ -153,6 +153,7 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
     const send = message => socket.send(JSON.stringify(message));
     socket.on('message', raw => {
       let message;
+      let command;
       try { message = JSON.parse(raw.toString()); } catch { send({ type: 'error', code: 'BAD_JSON' }); return; }
       try {
         if (message.type === 'create') room = manager.createRoom(playerId);
@@ -160,12 +161,12 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         else if (!room) throw new Error('NOT_IN_ROOM');
         else if (message.type === 'ready') room = manager.setReady(room.code, playerId);
         else if (message.type === 'start') room = manager.startRoom(room.code, playerId);
-        else if (message.type === 'command') manager.recordCommand(room.code, playerId, message.payload);
+        else if (message.type === 'command') command = manager.recordCommand(room.code, playerId, message.payload);
         else if (message.type === 'state') manager.updateState(room.code, playerId, message.state);
         else throw new Error('UNKNOWN_MESSAGE');
         if (room) {
           room.clients.set(playerId, socket);
-          const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : message.type === 'start' ? 'countdown' : 'room', room: manager.snapshot(room.code), playerId, countdown: message.type === 'start' ? 3 : undefined, payload: message.payload };
+          const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : message.type === 'start' ? 'countdown' : 'room', room: manager.snapshot(room.code), playerId, countdown: message.type === 'start' ? 3 : undefined, payload: message.payload, effect: command?.effect };
           room.clients.forEach((client, clientId) => {
             if (client.readyState === 1) client.send(JSON.stringify({ ...event, selfId: clientId }));
           });

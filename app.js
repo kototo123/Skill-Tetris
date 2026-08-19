@@ -44,13 +44,14 @@ function applySelfState(state) {
   // replacing the active piece on every snapshot causes visible rubber-banding.
   if (Number.isFinite(state.energy) && state.energy > local.energy) local.energy = state.energy;
   local.alive = state.alive !== false;
-  if (Array.isArray(state.board) && state.board.length === local.board.length) {
-    const serverGarbage = state.board.flat().filter(cell => cell === 8).length;
-    const localGarbage = local.board.flat().filter(cell => cell === 8).length;
-    if (serverGarbage > localGarbage) local.board = state.board;
-  }
   if (!local.alive) finishMatch('你输了');
   paint('a');
+}
+
+function showCountdown(value) {
+  const text = `比赛将在 ${value} 秒后开始`;
+  document.querySelector('#snapshot').textContent = text;
+  log(text);
 }
 
 function setOnlineControls() {
@@ -113,7 +114,7 @@ const network = new MatchClient({
       hostId = event.room.players[0]?.playerId || '';
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
-      if (event.room.status === 'countdown') runCountdown(event.room.countdown || 3);
+      if (event.room.status === 'countdown') { showCountdown(event.room.countdown || 3); runCountdown(event.room.countdown || 3); }
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
       if (event.room.status === 'playing') matchStarted = true;
@@ -122,10 +123,14 @@ const network = new MatchClient({
       if (self && event.type === 'snapshot') applySelfState(self.state);
       if (opponent) applyRemoteState(opponent.state);
     }
-    if (event.type === 'countdown') runCountdown(event.countdown || 3);
+    if (event.type === 'countdown') { showCountdown(event.countdown || 3); runCountdown(event.countdown || 3); }
     if (event.type === 'command' && event.payload?.type === 'skill') {
       const name = event.payload.skill === 'strike' ? '电弧轰击' : '棱镜护盾';
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
+    }
+    if (event.type === 'command' && event.payload?.type === 'skill' && event.playerId !== selfId && event.payload.skill === 'strike') {
+      players.a.board = addGarbageLines(players.a.board, 2);
+      paint('a');
     }
     if (event.type === 'error') log(`network error: ${event.code}`);
   }
@@ -190,10 +195,7 @@ document.querySelectorAll('.skill').forEach(button => {
     const cost = button.dataset.skill === 'strike' ? 20 : 10;
     if (player.energy < cost) return;
     player.energy -= cost;
-    if (button.dataset.skill === 'strike') {
-      const target = key === 'a' ? players.b : players.a;
-      target.board = addGarbageLines(target.board, 2);
-    } else player.shield = true;
+    if (button.dataset.skill === 'shield') player.shield = true;
     if (online) network.command({ type: 'skill', skill: button.dataset.skill });
     paint('a'); paint('b');
   };
