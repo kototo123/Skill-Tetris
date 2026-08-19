@@ -10,6 +10,18 @@ function makeCode() {
   return code;
 }
 
+function garbageBoard(board, count = 2) {
+  if (!Array.isArray(board) || !board.length) board = Array.from({ length: 20 }, () => Array(10).fill(0));
+  const width = board[0].length || 10;
+  const result = board.slice(count).map(row => row.slice());
+  for (let i = 0; i < count; i += 1) {
+    const row = Array(width).fill(8);
+    row[Math.floor(Math.random() * width)] = 0;
+    result.push(row);
+  }
+  return result;
+}
+
 class RoomManager {
   constructor() { this.rooms = new Map(); }
 
@@ -46,6 +58,9 @@ class RoomManager {
     if (room.players.length !== 2 || room.ready.size !== 2) throw new Error('NOT_READY');
     room.status = 'countdown';
     room.countdown = 3;
+    room.players.forEach(id => room.states.set(id, { score: 0, energy: 0, alive: true, board: null, current: null }));
+    room.commands = [];
+    room.seq = 0;
     return room;
   }
 
@@ -57,6 +72,14 @@ class RoomManager {
     const command = { seq: ++room.seq, playerId, payload, at: Date.now() };
     room.commands.push(command);
     if (room.commands.length > 200) room.commands.shift();
+    if (payload.type === 'skill' && payload.skill === 'strike') {
+      const opponentId = room.players.find(id => id !== playerId);
+      if (opponentId) {
+        const opponent = room.states.get(opponentId) || {};
+        opponent.board = garbageBoard(opponent.board, 2);
+        room.states.set(opponentId, opponent);
+      }
+    }
     return command;
   }
 

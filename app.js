@@ -8,6 +8,8 @@ let online = false;
 let selfId = '';
 let hostId = '';
 let matchStarted = false;
+let matchEnded = false;
+let remoteDropClock = 0;
 let lastStateSent = 0;
 const logEl = document.querySelector('#log');
 
@@ -31,6 +33,23 @@ function applyRemoteState(state) {
     remote.y = state.current.y;
   }
   paint('b');
+  if (!remote.alive) finishMatch('你赢了');
+}
+
+function applySelfState(state) {
+  if (!state) return;
+  const local = players.a;
+  if (Array.isArray(state.board)) local.board = state.board;
+  if (Number.isFinite(state.score)) local.score = state.score;
+  if (Number.isFinite(state.energy)) local.energy = state.energy;
+  local.alive = state.alive !== false;
+  if (state.current) {
+    local.current = { name: 'server', cells: state.current.cells, color: state.current.color };
+    local.x = state.current.x;
+    local.y = state.current.y;
+  }
+  if (!local.alive) finishMatch('你输了');
+  paint('a');
 }
 
 function setOnlineControls() {
@@ -41,6 +60,7 @@ function setOnlineControls() {
 }
 
 function runCountdown(seconds = 3) {
+  resetMatch();
   const overlay = document.querySelector('#countdown');
   overlay.hidden = false;
   overlay.style.display = 'grid';
@@ -57,6 +77,30 @@ function runCountdown(seconds = 3) {
   }, 1000);
 }
 
+function resetMatch() {
+  players.a = new Player('我', 'cyan');
+  players.b = new Player('对手', 'pink');
+  players.a.dropInterval = 760;
+  players.b.dropInterval = 760;
+  matchEnded = false;
+  matchStarted = false;
+  remoteDropClock = 0;
+  const result = document.querySelector('#result');
+  result.hidden = true;
+  result.style.display = 'none';
+  paint('a');
+  paint('b');
+}
+
+function finishMatch(message) {
+  if (matchEnded) return;
+  matchEnded = true;
+  const result = document.querySelector('#result');
+  result.textContent = message;
+  result.hidden = false;
+  result.style.display = 'grid';
+}
+
 const network = new MatchClient({
   onStatus: status => document.querySelector('#online-status').textContent = status,
   onEvent: event => {
@@ -69,6 +113,8 @@ const network = new MatchClient({
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
       if (event.room.status === 'playing') matchStarted = true;
       const opponent = event.room.players.find(player => player.playerId !== selfId);
+      const self = event.room.players.find(player => player.playerId === selfId);
+      if (self && event.type === 'snapshot') applySelfState(self.state);
       if (opponent) applyRemoteState(opponent.state);
     }
     if (event.type === 'countdown') runCountdown(event.countdown || 3);
@@ -167,6 +213,15 @@ function loop(now) {
       paint(key);
     }
   });
+  if (online && matchStarted && !matchEnded) {
+    remoteDropClock += delta;
+    if (remoteDropClock >= players.b.dropInterval) {
+      remoteDropClock = 0;
+      if (players.b.alive && !players.b.softDrop()) players.b.lock();
+      paint('b');
+    }
+    if (!players.a.alive) finishMatch('你输了');
+  }
   if (online && matchStarted && now - lastStateSent >= 100) {
     lastStateSent = now;
     network.state(stateOf(players.a));

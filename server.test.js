@@ -157,4 +157,18 @@ test('only the host can start a ready room and emits a three second countdown', 
   assert.equal(started.countdown, 3);
 });
 
+test('starting a room resets player state and a strike adds garbage to the opponent', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  manager.updateState(room.code, 'host', { score: 99, energy: 80, alive: false, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  manager.setReady(room.code, 'host');
+  manager.setReady(room.code, 'guest');
+  manager.startRoom(room.code, 'host');
+  assert.equal(room.states.get('host').score, 0);
+  assert.equal(room.states.get('host').alive, true);
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
+  assert.equal(room.states.get('guest').board.at(-1).some(cell => cell === 8), true);
+});
+
 console.log('server room tests passed');
