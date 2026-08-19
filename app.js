@@ -15,6 +15,7 @@ let skillSyncPauseUntil = 0;
 let hiddenAt = 0;
 let roomStatus = 'waiting';
 const logEl = document.querySelector('#log');
+const skillNames = { jam: '干扰锁定', reverse: '反向操控', shield: '棱镜护盾', cleanse: '净化' };
 
 function log(message) {
   const item = document.createElement('p');
@@ -237,7 +238,8 @@ function paint(key) {
   document.querySelector('#fill-' + key).style.width = `${player.energy}%`;
   document.querySelectorAll(`.skill[data-player="${key}"]`).forEach(button => {
     const cost = 10;
-    button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || player.energy < cost || !player.alive;
+    button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || !player.alive;
+    button.classList.toggle('insufficient', player.energy < cost);
   });
 }
 
@@ -288,7 +290,10 @@ document.querySelectorAll('.skill').forEach(button => {
     if (online && (roomStatus !== 'playing' || matchEnded)) return;
     const player = players[key];
     const cost = 10;
-    if (player.energy < cost) return;
+    if (player.energy < cost) {
+      log('能量不足，需要 10 点');
+      return;
+    }
     player.energy -= cost;
     if (button.dataset.skill === 'shield') player.shield = true;
     if (button.dataset.skill === 'cleanse') player.board = cleanseBoard(player.board, 2);
@@ -296,6 +301,7 @@ document.querySelectorAll('.skill').forEach(button => {
       network.command({ type: 'skill', skill: button.dataset.skill });
       skillSyncPauseUntil = performance.now() + 500;
     }
+    log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
     paint('a'); paint('b');
   });
 });

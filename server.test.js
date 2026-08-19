@@ -195,6 +195,7 @@ test('starting a room resets player state and jam locks the opponent piece', () 
   manager.startRoom(room.code, 'host');
   room.status = 'playing';
   assert.equal(room.states.get('host').score, 0);
+  assert.equal(room.states.get('host').energy, 20);
   assert.equal(room.states.get('host').alive, true);
   manager.updateState(room.code, 'host', { energy: 10, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
   const strike = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });

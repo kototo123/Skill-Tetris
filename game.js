@@ -73,7 +73,7 @@
       this.next = randomShape();
       this.x = 3;
       this.y = -1;
-      this.energy = 0;
+      this.energy = 20;
       this.score = 0;
       this.combo = 0;
       this.alive = true;

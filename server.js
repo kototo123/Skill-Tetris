@@ -17,7 +17,7 @@ class RoomManager {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
     const room = { code, hostId: playerId, status: 'waiting', countdown: 0, players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
-    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
+    room.states.set(playerId, { score: 0, energy: 20, alive: true, board: null, current: null });
     this.rooms.set(code, room);
     return room;
   }
@@ -28,7 +28,7 @@ class RoomManager {
     if (room.players.includes(playerId)) return room;
     if (room.players.length >= 2) throw new Error('ROOM_FULL');
     room.players.push(playerId);
-    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
+    room.states.set(playerId, { score: 0, energy: 20, alive: true, board: null, current: null });
     return room;
   }
 
@@ -48,7 +48,7 @@ class RoomManager {
     if (room.players.length !== 2 || room.ready.size !== 2) throw new Error('NOT_READY');
     room.status = 'countdown';
     room.countdown = 3;
-    room.players.forEach(id => room.states.set(id, { score: 0, energy: 0, alive: true, board: null, current: null }));
+    room.players.forEach(id => room.states.set(id, { score: 0, energy: 20, alive: true, board: null, current: null }));
     room.commands = [];
     room.seq = 0;
     return room;
@@ -109,7 +109,7 @@ class RoomManager {
       score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
       // State snapshots report energy earned by clearing lines. Skill spending
       // is applied separately by recordCommand.
-      energy: Number.isFinite(state?.energy) ? Math.max(previous.energy || 0, Math.max(0, Math.min(100, state.energy))) : previous.energy || 0,
+      energy: Number.isFinite(state?.energy) ? Math.max(0, Math.min(100, state.energy)) : previous.energy || 0,
       alive: state?.alive !== false,
       shield: previous.shield === true,
       jammed: state?.jammed === true,
