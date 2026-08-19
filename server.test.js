@@ -56,6 +56,23 @@ test('serves the mobile client from the realtime server', async () => {
   assert.match(response.body, /Skill Tetris/);
 });
 
+test('serves the synchronized mobile app script', async () => {
+  const { httpServer } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const response = await new Promise((resolve, reject) => {
+    http.get(`http://127.0.0.1:${port}/app.js`, res => {
+      let body = '';
+      res.on('data', chunk => body += chunk);
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    }).on('error', reject);
+  });
+  await new Promise(resolve => httpServer.close(resolve));
+  assert.equal(response.status, 200);
+  assert.match(response.body, /applyRemoteState/);
+  assert.match(response.body, /dropInterval = 760/);
+});
+
 test('returns a stable error when a client sends state before joining a room', async () => {
   const { httpServer, wss } = createServer();
   await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
@@ -71,6 +88,59 @@ test('returns a stable error when a client sends state before joining a room', a
   const closed = new Promise(resolve => socket.once('close', resolve));
   socket.close();
   await closed;
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
+});
+
+function openSocket(port) {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+  return new Promise((resolve, reject) => {
+    socket.once('open', () => resolve(socket));
+    socket.once('error', reject);
+  });
+}
+
+function nextMessage(socket, predicate = () => true) {
+  return new Promise((resolve, reject) => {
+    const onMessage = raw => {
+      const message = JSON.parse(raw.toString());
+      if (!predicate(message)) return;
+      socket.off('message', onMessage);
+      resolve(message);
+    };
+    socket.on('message', onMessage);
+    socket.once('error', reject);
+  });
+}
+
+test('identifies each client and broadcasts the opponent active-piece snapshot', async () => {
+  const { httpServer, wss } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const first = await openSocket(port);
+  const second = await openSocket(port);
+
+  const created = nextMessage(first, message => message.type === 'room');
+  first.send(JSON.stringify({ type: 'create' }));
+  const firstRoom = await created;
+  assert.equal(firstRoom.selfId, firstRoom.room.players[0].playerId);
+
+  const joinedForSecond = nextMessage(second, message => message.type === 'room');
+  second.send(JSON.stringify({ type: 'join', code: firstRoom.room.code }));
+  const secondRoom = await joinedForSecond;
+  assert.equal(secondRoom.selfId, secondRoom.room.players[1].playerId);
+
+  const opponentSnapshot = nextMessage(second, message => message.type === 'snapshot');
+  first.send(JSON.stringify({ type: 'state', state: {
+    score: 25, energy: 10, alive: true, board: [[0]],
+    current: { cells: [[1]], x: 4, y: 3, color: 'cyan' }
+  } }));
+  const snapshot = await opponentSnapshot;
+  const firstState = snapshot.room.players.find(player => player.playerId === firstRoom.selfId).state;
+  assert.deepEqual(firstState.current, { cells: [[1]], x: 4, y: 3, color: 'cyan' });
+
+  first.terminate();
+  second.terminate();
   await new Promise(resolve => wss.close(resolve));
   await new Promise(resolve => httpServer.close(resolve));
 });

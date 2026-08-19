@@ -17,7 +17,7 @@ class RoomManager {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
     const room = { code, status: 'waiting', players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
-    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null });
+    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
     this.rooms.set(code, room);
     return room;
   }
@@ -28,7 +28,7 @@ class RoomManager {
     if (room.players.includes(playerId)) return room;
     if (room.players.length >= 2) throw new Error('ROOM_FULL');
     room.players.push(playerId);
-    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null });
+    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
     return room;
   }
 
@@ -59,7 +59,13 @@ class RoomManager {
       score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
       energy: Number.isFinite(state?.energy) ? Math.max(0, Math.min(100, state.energy)) : previous.energy || 0,
       alive: state?.alive !== false,
-      board: Array.isArray(state?.board) ? state.board : previous.board
+      board: Array.isArray(state?.board) ? state.board : previous.board,
+      current: state?.current && Array.isArray(state.current.cells) ? {
+        cells: state.current.cells,
+        x: Number.isFinite(state.current.x) ? state.current.x : 0,
+        y: Number.isFinite(state.current.y) ? state.current.y : 0,
+        color: String(state.current.color || 'cyan')
+      } : previous.current || null
     });
     return this.snapshot(room.code);
   }
@@ -84,7 +90,7 @@ class RoomManager {
 function createServer({ port = 4174, manager = new RoomManager() } = {}) {
   let WebSocketServer;
   try { ({ WebSocketServer } = require('ws')); } catch { WebSocketServer = null; }
-  const publicFiles = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/game.js': ['game.js', 'text/javascript; charset=utf-8'], '/client-network.js': ['client-network.js', 'text/javascript; charset=utf-8'] };
+  const publicFiles = { '/': ['index.html', 'text/html; charset=utf-8'], '/index.html': ['index.html', 'text/html; charset=utf-8'], '/game.js': ['game.js', 'text/javascript; charset=utf-8'], '/client-network.js': ['client-network.js', 'text/javascript; charset=utf-8'], '/app.js': ['app.js', 'text/javascript; charset=utf-8'] };
   const httpServer = http.createServer((req, res) => {
     if (req.url === '/health') { res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' }); res.end(JSON.stringify({ ok: true, service: 'hexa-clash', rooms: manager.rooms.size })); return; }
     const file = publicFiles[req.url];
@@ -113,7 +119,9 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         if (room) {
           room.clients.set(playerId, socket);
           const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : 'room', room: manager.snapshot(room.code), playerId, payload: message.payload };
-          room.clients.forEach(client => { if (client.readyState === 1) client.send(JSON.stringify(event)); });
+          room.clients.forEach((client, clientId) => {
+            if (client.readyState === 1) client.send(JSON.stringify({ ...event, selfId: clientId }));
+          });
         }
       } catch (error) { send({ type: 'error', code: error.message }); }
     });
