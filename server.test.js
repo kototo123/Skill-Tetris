@@ -289,4 +289,17 @@ test('accepts jam as a real low-cost skill', () => {
   assert.equal(room.states.get('host').energy, 0);
 });
 
+test('accepts reverse as a low-cost attack and marks the opponent', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  manager.updateState(room.code, 'host', { energy: 10 });
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'reverse' });
+  assert.equal(command.effect.reversed, true);
+  assert.equal(command.effect.cost, 10);
+  assert.equal(room.states.get('host').energy, 0);
+  assert.equal(room.states.get('guest').reversed, true);
+});
+
 console.log('server room tests passed');

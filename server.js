@@ -62,21 +62,27 @@ class RoomManager {
     if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
     const command = { seq: room.seq + 1, playerId, payload, at: Date.now() };
     if (payload.type === 'skill') {
-      const skillCost = payload.skill === 'jam' || payload.skill === 'shield' || payload.skill === 'cleanse' ? 10 : 0;
+      const skillCost = ['jam', 'reverse', 'shield', 'cleanse'].includes(payload.skill) ? 10 : 0;
       const attacker = room.states.get(playerId) || {};
       if (!skillCost || (attacker.energy || 0) < skillCost) throw new Error('INSUFFICIENT_ENERGY');
       attacker.energy -= skillCost;
       attacker.shield = payload.skill === 'shield';
       attacker.jammed = false;
+      attacker.reversed = false;
       if (payload.skill === 'cleanse') attacker.cleanse = true;
       const opponentId = room.players.find(id => id !== playerId);
       let blocked = false;
-      if (opponentId && payload.skill === 'jam') {
+      const attackSkill = payload.skill === 'jam' || payload.skill === 'reverse';
+      if (opponentId && attackSkill) {
         const opponent = room.states.get(opponentId) || {};
-        opponent.jammed = true;
+        if (opponent.shield) {
+          opponent.shield = false;
+          blocked = true;
+        } else if (payload.skill === 'jam') opponent.jammed = true;
+        else opponent.reversed = true;
         room.states.set(opponentId, opponent);
       }
-      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost, blocked, jammed: payload.skill === 'jam', cleanse: payload.skill === 'cleanse' ? 2 : 0 };
+      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost, blocked, jammed: payload.skill === 'jam' && !blocked, reversed: payload.skill === 'reverse' && !blocked, cleanse: payload.skill === 'cleanse' ? 2 : 0 };
       room.states.set(playerId, attacker);
     }
     room.seq = command.seq;
@@ -100,6 +106,7 @@ class RoomManager {
       alive: state?.alive !== false,
       shield: previous.shield === true,
       jammed: state?.jammed === true,
+      reversed: state?.reversed === true,
       board: nextBoard,
       current: state?.current && Array.isArray(state.current.cells) ? {
         cells: state.current.cells,

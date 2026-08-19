@@ -24,12 +24,12 @@ function log(message) {
 
 function animateSkill(skill, actorId) {
   const isSelf = actorId === selfId;
-  const targetKey = skill === 'jam' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
+  const targetKey = skill === 'jam' || skill === 'reverse' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
   const target = document.querySelector('#board-' + targetKey)?.closest('.player');
   if (!target) return;
   const toast = document.querySelector('#skill-toast');
   const flash = document.querySelector('#screen-flash');
-  const label = skill === 'jam' ? (isSelf ? '干扰锁定！' : '对手锁定了你的方块') : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
+  const label = skill === 'jam' ? (isSelf ? '干扰锁定！' : '对手锁定了你的方块') : skill === 'reverse' ? (isSelf ? '反向操控！' : '你的操作方向反了') : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
   toast.textContent = label;
   toast.classList.remove('show');
   flash.classList.remove('show');
@@ -37,7 +37,7 @@ function animateSkill(skill, actorId) {
   void target.offsetWidth;
   void toast.offsetWidth;
   toast.classList.add('show');
-  if (skill === 'jam') {
+  if (skill === 'jam' || skill === 'reverse') {
     target.classList.add(isSelf ? 'skill-cast' : 'skill-hit');
     flash.classList.add('show');
   } else {
@@ -55,6 +55,7 @@ function applyRemoteState(state) {
   remote.energy = state.energy || 0;
   remote.alive = state.alive !== false;
   remote.jammed = state.jammed === true;
+  remote.reversed = state.reversed === true;
   if (state.current) {
     remote.current = { name: 'remote', cells: state.current.cells, color: state.current.color };
     remote.x = state.current.x;
@@ -153,7 +154,7 @@ const network = new MatchClient({
     }
     if (event.type === 'countdown') { showCountdown(event.countdown || 3); runCountdown(event.countdown || 3); }
     if (event.type === 'command' && event.payload?.type === 'skill') {
-      const name = event.payload.skill === 'jam' ? '干扰锁定' : event.payload.skill === 'cleanse' ? '净化' : '棱镜护盾';
+      const name = event.payload.skill === 'jam' ? '干扰锁定' : event.payload.skill === 'reverse' ? '反向操控' : event.payload.skill === 'cleanse' ? '净化' : '棱镜护盾';
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
       if (event.effect?.targetId === selfId && event.effect.garbageLines > 0) {
         players.a.board = addGarbageLines(players.a.board, event.effect.garbageLines);
@@ -167,6 +168,11 @@ const network = new MatchClient({
         players.a.jammed = true;
         paint('a');
         log('你的当前方块被锁定，暂时无法旋转');
+      }
+      if (event.effect?.targetId === selfId && event.effect?.reversed) {
+        players.a.reversed = true;
+        paint('a');
+        log('你的左右和旋转方向被反转了');
       }
       if (event.effect?.blocked) log('护盾抵挡了这次攻击');
     }
@@ -243,9 +249,10 @@ function act(key, action) {
   if (online && matchEnded) return;
   const player = players[key];
   if (!player.alive) return;
-  if (action === 'left') player.move(-1);
-  if (action === 'right') player.move(1);
-  if (action === 'rotate' && !player.jammed) player.rotate();
+  const reverse = player.reversed === true;
+  if (action === 'left') player.move(reverse ? 1 : -1);
+  if (action === 'right') player.move(reverse ? -1 : 1);
+  if (action === 'rotate' && !player.jammed) reverse ? player.rotateReverse() : player.rotate();
   if (action === 'drop') player.softDrop();
   if (action === 'hard') player.hardDrop();
   if (online) network.command(commandFor(action));
@@ -304,7 +311,7 @@ function cleanseBoard(board, count) {
 
 function stateOf(player) {
   return {
-    score: player.score, energy: player.energy, alive: player.alive, jammed: player.jammed === true, board: player.board,
+    score: player.score, energy: player.energy, alive: player.alive, jammed: player.jammed === true, reversed: player.reversed === true, board: player.board,
     current: { cells: player.current.cells, x: player.x, y: player.y, color: player.current.color }
   };
 }

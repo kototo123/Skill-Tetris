@@ -17,6 +17,10 @@
     return matrix[0].map((_, x) => matrix.map(row => row[x]).reverse());
   }
 
+  function rotateCounterClockwise(matrix) {
+    return matrix[0].map((_, x) => matrix.map(row => row[row.length - 1 - x]));
+  }
+
   function collides(board, piece, x, y) {
     return piece.some((row, dy) => row.some((cell, dx) => {
       if (!cell) return false;
@@ -93,6 +97,11 @@
       const next = rotate(this.current.cells);
       if (!collides(this.board, next, this.x, this.y)) this.current.cells = next;
     }
+    rotateReverse() {
+      if (this.jammed) return;
+      const next = rotateCounterClockwise(this.current.cells);
+      if (!collides(this.board, next, this.x, this.y)) this.current.cells = next;
+    }
     softDrop() { if (!collides(this.board, this.current.cells, this.x, this.y + 1)) { this.y += 1; return true; } return false; }
     hardDrop() { while (this.softDrop()) this.score += 2; this.lock(); }
     lock() {
@@ -106,11 +115,12 @@
       } else this.combo = 0;
       this.spawn();
       this.jammed = false;
+      this.reversed = false;
       return result.lines;
     }
   }
 
-  const api = { SHAPES, createBoard, rotate, collides, mergePiece, clearLines, addGarbageLines, canUseSkill, randomShape, Player };
+  const api = { SHAPES, createBoard, rotate, rotateCounterClockwise, collides, mergePiece, clearLines, addGarbageLines, canUseSkill, randomShape, Player };
   if (typeof module !== 'undefined') module.exports = api;
   root.HexGame = api;
 })(typeof window !== 'undefined' ? window : globalThis);
