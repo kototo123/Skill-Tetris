@@ -16,7 +16,8 @@ class RoomManager {
   createRoom(playerId) {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
-    const room = { code, status: 'waiting', players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map() };
+    const room = { code, status: 'waiting', players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
+    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null });
     this.rooms.set(code, room);
     return room;
   }
@@ -27,6 +28,7 @@ class RoomManager {
     if (room.players.includes(playerId)) return room;
     if (room.players.length >= 2) throw new Error('ROOM_FULL');
     room.players.push(playerId);
+    room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null });
     return room;
   }
 
@@ -41,10 +43,35 @@ class RoomManager {
   recordCommand(code, playerId, payload) {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
+    if (!payload || !['move', 'rotate', 'softDrop', 'hardDrop', 'skill'].includes(payload.type)) throw new Error('INVALID_COMMAND');
+    if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
     const command = { seq: ++room.seq, playerId, payload, at: Date.now() };
     room.commands.push(command);
     if (room.commands.length > 200) room.commands.shift();
     return command;
+  }
+
+  updateState(code, playerId, state) {
+    const room = this.getRoom(code);
+    if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
+    const previous = room.states.get(playerId) || {};
+    room.states.set(playerId, {
+      score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
+      energy: Number.isFinite(state?.energy) ? Math.max(0, Math.min(100, state.energy)) : previous.energy || 0,
+      alive: state?.alive !== false,
+      board: Array.isArray(state?.board) ? state.board : previous.board
+    });
+    return this.snapshot(room.code);
+  }
+
+  snapshot(code) {
+    const room = this.getRoom(code);
+    return {
+      code: room.code,
+      status: room.status,
+      players: room.players.map(playerId => ({ playerId, ready: room.ready.has(playerId), connected: room.clients.has(playerId), state: room.states.get(playerId) || null })),
+      seq: room.seq
+    };
   }
 
   getRoom(code) {
@@ -80,11 +107,12 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         else if (message.type === 'join') room = manager.joinRoom(message.code, playerId);
         else if (message.type === 'ready') room = manager.setReady(room.code, playerId);
         else if (message.type === 'command') manager.recordCommand(room.code, playerId, message.payload);
+        else if (message.type === 'state') manager.updateState(room.code, playerId, message.state);
         else throw new Error('UNKNOWN_MESSAGE');
         if (room) {
           room.clients.set(playerId, socket);
-          const event = { type: message.type === 'command' ? 'command' : 'room', room: { code: room.code, status: room.status, players: room.players } };
-          room.clients.forEach(client => { if (client.readyState === 1) client.send(JSON.stringify({ ...event, playerId, payload: message.payload })); });
+          const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : 'room', room: manager.snapshot(room.code), playerId, payload: message.payload };
+          room.clients.forEach(client => { if (client.readyState === 1) client.send(JSON.stringify(event)); });
         }
       } catch (error) { send({ type: 'error', code: error.message }); }
     });

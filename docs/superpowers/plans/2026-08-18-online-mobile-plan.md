@@ -22,26 +22,26 @@
 
 **Files:** Create `package.json`, `server.js`, `server.test.js`.
 
-- [ ] Write tests for room creation, join by code, ready state, and broadcast.
-- [ ] Run `node --test server.test.js` and observe failure.
-- [ ] Implement an in-memory room manager and WebSocket message router.
-- [ ] Run tests and verify all pass.
+- [x] Write tests for room creation, join by code, ready state, and broadcast.
+- [x] Run `node --test server.test.js` and observe failure.
+- [x] Implement an in-memory room manager and WebSocket message router.
+- [x] Run tests and verify all pass.
 
 ### Task 2: Browser client connection shell
 
 **Files:** Modify `index.html`; create `client-network.js`.
 
-- [ ] Add room code input, create/join controls, and connection status.
-- [ ] Connect to the current host WebSocket endpoint and render room events.
-- [ ] Keep local practice mode available when no server is reachable.
+- [x] Add room code input, create/join controls, and connection status.
+- [x] Connect to the current host WebSocket endpoint and render room events.
+- [x] Keep local practice mode available when no server is reachable.
 - [ ] Verify on desktop and 390x844 viewport.
 
 ### Task 3: Mobile interaction and protocol integration
 
 **Files:** Modify `index.html`, `game.js`, `client-network.js`.
 
-- [ ] Send player commands through the protocol.
-- [ ] Render opponent summary and server snapshots.
+- [x] Send player commands through the protocol.
+- [x] Render opponent summary and server snapshots.
 - [ ] Add reconnect handling and a 20-second room grace period.
 - [ ] Run rule tests and browser interaction checks.
 

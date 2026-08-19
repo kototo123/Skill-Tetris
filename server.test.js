@@ -26,6 +26,18 @@ test('records ordered player commands', () => {
   assert.equal(room.commands[0].seq, 1);
 });
 
+test('rejects malformed commands and exposes authoritative snapshots', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  manager.joinRoom(room.code, 'p2');
+  assert.throws(() => manager.recordCommand(room.code, 'p1', { type: 'move', direction: 0 }), /INVALID_DIRECTION/);
+  manager.recordCommand(room.code, 'p1', { type: 'hardDrop' });
+  const snapshot = manager.updateState(room.code, 'p1', { score: 12, energy: 150, alive: true, board: [[1]] });
+  assert.equal(snapshot.seq, 1);
+  assert.equal(snapshot.players.find(player => player.playerId === 'p1').state.energy, 100);
+  assert.equal(snapshot.players.find(player => player.playerId === 'p2').connected, false);
+});
+
 test('serves the mobile client from the realtime server', async () => {
   const { httpServer } = createServer();
   await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
@@ -40,7 +52,7 @@ test('serves the mobile client from the realtime server', async () => {
   await new Promise(resolve => httpServer.close(resolve));
   assert.equal(response.status, 200);
   assert.match(response.type, /text\/html/);
-  assert.match(response.body, /海克斯方块乱斗/);
+  assert.match(response.body, /Skill Tetris/);
 });
 
 console.log('server room tests passed');
