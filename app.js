@@ -171,17 +171,18 @@ const network = new MatchClient({
 const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}`;
 function bindTap(selector, action) {
   const button = document.querySelector(selector);
-  let lastTap = 0;
-  const trigger = event => {
-    event?.preventDefault();
-    const now = Date.now();
-    if (now - lastTap < 150) return;
-    lastTap = now;
+  let lastTouch = 0;
+  button.addEventListener('pointerup', event => {
+    if (event.pointerType === 'mouse') return;
+    event.preventDefault();
+    lastTouch = Date.now();
     action();
-  };
-  button.addEventListener('pointerdown', trigger, { passive: false });
-  button.addEventListener('touchstart', trigger, { passive: false });
-  button.addEventListener('click', trigger);
+  }, { passive: false });
+  button.addEventListener('click', event => {
+    if (Date.now() - lastTouch < 500) return;
+    event.preventDefault();
+    action();
+  });
 }
 bindTap('#create-room', () => { network.connect(wsUrl); network.create(); });
 bindTap('#join-room', () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); });
@@ -244,16 +245,20 @@ function act(key, action) {
 
 document.querySelectorAll('.controls button').forEach(button => {
   let lastTouch = 0;
-  const trigger = event => {
-    if (event) event.preventDefault();
-    const now = Date.now();
-    if (now - lastTouch < 120) return;
-    lastTouch = now;
+  const trigger = () => {
     act(button.parentElement.dataset.player, button.dataset.action);
   };
-  button.addEventListener('pointerdown', trigger, { passive: false });
-  button.addEventListener('touchstart', trigger, { passive: false });
-  button.addEventListener('click', trigger);
+  button.addEventListener('pointerup', event => {
+    if (event.pointerType === 'mouse') return;
+    event.preventDefault();
+    lastTouch = Date.now();
+    trigger();
+  }, { passive: false });
+  button.addEventListener('click', event => {
+    if (Date.now() - lastTouch < 500) return;
+    event.preventDefault();
+    trigger();
+  });
 });
 
 document.querySelectorAll('.skill').forEach(button => {
