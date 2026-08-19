@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('node:http');
 const { RoomManager, createServer } = require('./server.js');
+const WebSocket = require('ws');
 
 test('creates a room with a short invite code', () => {
   const manager = new RoomManager();
@@ -39,7 +40,7 @@ test('rejects malformed commands and exposes authoritative snapshots', () => {
 });
 
 test('serves the mobile client from the realtime server', async () => {
-  const { httpServer } = createServer();
+  const { httpServer, wss } = createServer();
   await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
   const { port } = httpServer.address();
   const response = await new Promise((resolve, reject) => {
@@ -53,6 +54,25 @@ test('serves the mobile client from the realtime server', async () => {
   assert.equal(response.status, 200);
   assert.match(response.type, /text\/html/);
   assert.match(response.body, /Skill Tetris/);
+});
+
+test('returns a stable error when a client sends state before joining a room', async () => {
+  const { httpServer, wss } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+  await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+  const response = new Promise((resolve, reject) => {
+    socket.once('message', raw => resolve(JSON.parse(raw.toString())));
+    socket.once('error', reject);
+  });
+  socket.send(JSON.stringify({ type: 'state', state: { score: 0 } }));
+  assert.deepEqual(await response, { type: 'error', code: 'NOT_IN_ROOM' });
+  const closed = new Promise(resolve => socket.once('close', resolve));
+  socket.close();
+  await closed;
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
 });
 
 console.log('server room tests passed');

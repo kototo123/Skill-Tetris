@@ -5,26 +5,38 @@
       this.onStatus = onStatus;
       this.socket = null;
       this.roomCode = '';
+      this.pending = [];
     }
     connect(url) {
       if (this.socket && this.socket.readyState <= 1) return;
       this.onStatus('connecting');
       try {
         this.socket = new WebSocket(url);
-        this.socket.onopen = () => this.onStatus('connected');
+        this.socket.onopen = () => {
+          this.onStatus('connected');
+          this.pending.splice(0).forEach(message => this.socket.send(JSON.stringify(message)));
+        };
         this.socket.onclose = () => this.onStatus('offline - practice mode');
         this.socket.onerror = () => this.onStatus('connection failed - practice mode');
         this.socket.onmessage = event => {
-          try { this.onEvent(JSON.parse(event.data)); } catch { this.onEvent({ type: 'error', code: 'BAD_SERVER_MESSAGE' }); }
+          try {
+            const message = JSON.parse(event.data);
+            if (message.room?.code) this.roomCode = message.room.code;
+            this.onEvent(message);
+          } catch { this.onEvent({ type: 'error', code: 'BAD_SERVER_MESSAGE' }); }
         };
       } catch { this.onStatus('connection failed - practice mode'); }
     }
-    send(type, payload = {}) { if (this.socket?.readyState === 1) this.socket.send(JSON.stringify({ type, ...payload })); }
-    create() { this.send('create'); }
-    join(code) { this.send('join', { code }); }
-    ready() { this.send('ready'); }
-    command(payload) { this.send('command', { payload }); }
-    state(state) { this.send('state', { state }); }
+    send(type, payload = {}, queue = false) {
+      const message = { type, ...payload };
+      if (this.socket?.readyState === 1) this.socket.send(JSON.stringify(message));
+      else if (queue) this.pending.push(message);
+    }
+    create() { this.send('create', {}, true); }
+    join(code) { this.send('join', { code }, true); }
+    ready() { if (this.roomCode) this.send('ready'); }
+    command(payload) { if (this.roomCode) this.send('command', { payload }); }
+    state(state) { if (this.roomCode) this.send('state', { state }); }
   }
   root.MatchClient = MatchClient;
 })(typeof window !== 'undefined' ? window : globalThis);

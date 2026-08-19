@@ -105,6 +105,7 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
       try {
         if (message.type === 'create') room = manager.createRoom(playerId);
         else if (message.type === 'join') room = manager.joinRoom(message.code, playerId);
+        else if (!room) throw new Error('NOT_IN_ROOM');
         else if (message.type === 'ready') room = manager.setReady(room.code, playerId);
         else if (message.type === 'command') manager.recordCommand(room.code, playerId, message.payload);
         else if (message.type === 'state') manager.updateState(room.code, playerId, message.state);
