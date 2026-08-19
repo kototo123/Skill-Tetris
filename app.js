@@ -39,14 +39,14 @@ function applyRemoteState(state) {
 function applySelfState(state) {
   if (!state) return;
   const local = players.a;
-  if (Array.isArray(state.board)) local.board = state.board;
-  if (Number.isFinite(state.score)) local.score = state.score;
-  if (Number.isFinite(state.energy)) local.energy = state.energy;
+  // Keep local movement prediction stable. Only import server-owned outcomes;
+  // replacing the active piece on every snapshot causes visible rubber-banding.
+  if (Number.isFinite(state.energy) && state.energy > local.energy) local.energy = state.energy;
   local.alive = state.alive !== false;
-  if (state.current) {
-    local.current = { name: 'server', cells: state.current.cells, color: state.current.color };
-    local.x = state.current.x;
-    local.y = state.current.y;
+  if (Array.isArray(state.board) && state.board.length === local.board.length) {
+    const serverGarbage = state.board.flat().filter(cell => cell === 8).length;
+    const localGarbage = local.board.flat().filter(cell => cell === 8).length;
+    if (serverGarbage > localGarbage) local.board = state.board;
   }
   if (!local.alive) finishMatch('你输了');
   paint('a');
