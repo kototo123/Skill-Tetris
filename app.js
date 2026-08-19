@@ -25,7 +25,7 @@ function log(message) {
 }
 
 function animateSkill(skill, actorId) {
-  const isSelf = actorId === selfId;
+  const isSelf = actorId === selfId || (!online && actorId === 'local-a');
   const targetKey = skill === 'jam' || skill === 'reverse' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
   const target = document.querySelector('#board-' + targetKey)?.closest('.player');
   if (!target) return;
@@ -294,12 +294,18 @@ function useSkill(button) {
       return;
     }
     player.energy -= cost;
+    if (!online) {
+      const opponent = key === 'a' ? players.b : players.a;
+      if (button.dataset.skill === 'jam') opponent.jammed = true;
+      if (button.dataset.skill === 'reverse') opponent.reversed = true;
+    }
     if (button.dataset.skill === 'shield') player.shield = true;
     if (button.dataset.skill === 'cleanse') player.board = cleanseBoard(player.board, 2);
     if (online) {
       network.command({ type: 'skill', skill: button.dataset.skill });
       skillSyncPauseUntil = performance.now() + 500;
     }
+    animateSkill(button.dataset.skill, online ? selfId : `local-${key}`);
     log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
     paint('a'); paint('b');
 }
