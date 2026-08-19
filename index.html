@@ -40,6 +40,18 @@
       #countdown{font-size:68px!important}
       #result{font-size:25px!important}
     }
+    .effect-layer{position:fixed;inset:0;pointer-events:none;z-index:20;display:grid;place-items:center}
+    .skill-toast{padding:12px 18px;border:1px solid #ffffff66;border-radius:999px;background:#101722eF;color:#fff;font-size:16px;font-weight:900;letter-spacing:.04em;opacity:0;transform:translateY(12px) scale(.9)}
+    .skill-toast.show{animation:toast-pop 900ms ease-out forwards}
+    .screen-flash{position:fixed;inset:0;background:#ff456655;opacity:0}
+    .screen-flash.show{animation:flash-hit 420ms ease-out}
+    .player.skill-hit{animation:board-shake 420ms ease-out}
+    .player.skill-cast{animation:cast-pulse 520ms ease-out}
+    .player.skill-shield{box-shadow:0 0 0 2px #62dfff,0 0 24px #38d6e5aa,inset 0 0 22px #38d6e522}
+    @keyframes toast-pop{0%{opacity:0;transform:translateY(12px) scale(.9)}20%,75%{opacity:1;transform:translateY(0) scale(1)}100%{opacity:0;transform:translateY(-8px) scale(1.02)}}
+    @keyframes flash-hit{0%,100%{opacity:0}18%{opacity:1}45%{opacity:.35}}
+    @keyframes board-shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-5px) rotate(-.5deg)}40%{transform:translateX(5px) rotate(.5deg)}60%{transform:translateX(-3px)}80%{transform:translateX(3px)}}
+    @keyframes cast-pulse{0%,100%{filter:none}45%{filter:brightness(1.8) saturate(1.5)}}
   </style>
 </head>
 <body><main class="app">
@@ -52,6 +64,7 @@
     <aside class="center"><div class="center-panel"><h2>对战记录</h2><div class="log" id="log"></div></div><div class="center-panel"><h2>连接快照</h2><div id="snapshot" class="tag">等待房间事件</div></div></aside>
   </section>
 </main>
+<div class="effect-layer" aria-hidden="true"><div id="skill-toast" class="skill-toast"></div></div><div id="screen-flash" class="screen-flash" aria-hidden="true"></div>
 <script src="game.js"></script><script src="client-network.js"></script><script type="text/plain">
 const {Player,addGarbageLines}=HexGame;const players={a:new Player('Player 1','cyan'),b:new Player('Player 2','pink')};players.b.dropInterval=6000;const logEl=document.querySelector('#log');const log=m=>{const p=document.createElement('p');p.textContent=m;logEl.prepend(p)};const network=new MatchClient({onStatus:s=>document.querySelector('#online-status').textContent=s,onEvent:e=>{if(e.room){document.querySelector('#room-code').value=e.room.code;document.querySelector('#snapshot').textContent=`${e.room.status} · ${e.room.players.length}/2 players · seq ${e.room.seq}`};if(e.type==='command')log(`server command #${e.room.seq}: ${e.payload?.type||''}`);if(e.type==='error')log(`network error: ${e.code}`)}});const wsUrl=`${location.protocol==='https:'?'wss':'ws'}://${location.host}`;document.querySelector('#create-room').onclick=()=>{network.connect(wsUrl);network.create()};document.querySelector('#join-room').onclick=()=>{network.connect(wsUrl);network.join(document.querySelector('#room-code').value)};document.querySelector('#ready-room').onclick=()=>network.ready();
 function paint(k){const p=players[k],cells=p.board.map(r=>r.slice());p.current.cells.forEach((r,dy)=>r.forEach((v,dx)=>{if(v&&p.y+dy>=0&&cells[p.y+dy])cells[p.y+dy][p.x+dx]=p.current.color}));document.querySelector('#board-'+k).innerHTML=cells.flat().map(v=>`<div class="cell ${v?'filled '+(v===8?'garbage':v):''}"></div>`).join('');document.querySelector('#score-'+k).textContent=`${p.score} pts`;document.querySelector('#energy-'+k).textContent=`${p.energy} / 100`;document.querySelector('#fill-'+k).style.width=`${p.energy}%`;document.querySelectorAll(`.skill[data-player="${k}"]`).forEach(b=>b.disabled=p.energy<({strike:20,shield:10}[b.dataset.skill])||!p.alive)}

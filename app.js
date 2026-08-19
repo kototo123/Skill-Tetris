@@ -21,6 +21,31 @@ function log(message) {
   while (logEl.children.length > 8) logEl.lastChild.remove();
 }
 
+function animateSkill(skill, actorId) {
+  const isSelf = actorId === selfId;
+  const targetKey = skill === 'strike' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
+  const target = document.querySelector('#board-' + targetKey)?.closest('.player');
+  if (!target) return;
+  const toast = document.querySelector('#skill-toast');
+  const flash = document.querySelector('#screen-flash');
+  const label = skill === 'strike' ? (isSelf ? '电弧轰击！' : '对手释放电弧轰击') : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
+  toast.textContent = label;
+  toast.classList.remove('show');
+  flash.classList.remove('show');
+  target.classList.remove('skill-hit', 'skill-cast', 'skill-shield');
+  void target.offsetWidth;
+  void toast.offsetWidth;
+  toast.classList.add('show');
+  if (skill === 'strike') {
+    target.classList.add(isSelf ? 'skill-cast' : 'skill-hit');
+    flash.classList.add('show');
+  } else {
+    target.classList.add('skill-shield');
+    setTimeout(() => target.classList.remove('skill-shield'), 1800);
+  }
+  setTimeout(() => { target.classList.remove('skill-hit', 'skill-cast'); flash.classList.remove('show'); }, 700);
+}
+
 function applyRemoteState(state) {
   if (!state) return;
   const remote = players.b;
@@ -131,6 +156,9 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill' && event.playerId !== selfId && event.payload.skill === 'strike') {
       players.a.board = addGarbageLines(players.a.board, 2);
       paint('a');
+    }
+    if (event.type === 'command' && event.payload?.type === 'skill') {
+      animateSkill(event.payload.skill, event.playerId);
     }
     if (event.type === 'error') log(`network error: ${event.code}`);
   }
