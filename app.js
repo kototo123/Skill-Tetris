@@ -9,9 +9,9 @@ let selfId = '';
 let hostId = '';
 let matchStarted = false;
 let matchEnded = false;
-let remoteDropClock = 0;
 let countdownRunning = false;
 let lastStateSent = 0;
+let hiddenAt = 0;
 const logEl = document.querySelector('#log');
 
 function log(message) {
@@ -114,7 +114,6 @@ function resetMatch() {
   players.b.dropInterval = 760;
   matchEnded = false;
   matchStarted = false;
-  remoteDropClock = 0;
   const result = document.querySelector('#result');
   result.hidden = true;
   result.style.display = 'none';
@@ -143,6 +142,7 @@ const network = new MatchClient({
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
       if (event.room.status === 'playing') matchStarted = true;
+      if (event.room.status === 'finished' && event.room.winnerId) finishMatch(event.room.winnerId === selfId ? '你赢了' : '你输了');
       const opponent = event.room.players.find(player => player.playerId !== selfId);
       const self = event.room.players.find(player => player.playerId === selfId);
       if (self && event.type === 'snapshot') applySelfState(self.state);
@@ -152,10 +152,10 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill') {
       const name = event.payload.skill === 'strike' ? '电弧轰击' : '棱镜护盾';
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
-    }
-    if (event.type === 'command' && event.payload?.type === 'skill' && event.playerId !== selfId && event.payload.skill === 'strike') {
-      players.a.board = addGarbageLines(players.a.board, 2);
-      paint('a');
+      if (event.effect?.targetId === selfId && event.effect.skill === 'strike') {
+        players.a.board = addGarbageLines(players.a.board, 2);
+        paint('a');
+      }
     }
     if (event.type === 'command' && event.payload?.type === 'skill') {
       animateSkill(event.payload.skill, event.playerId);
@@ -169,6 +169,18 @@ document.querySelector('#create-room').onclick = () => { network.connect(wsUrl);
 document.querySelector('#join-room').onclick = () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); };
 document.querySelector('#ready-room').onclick = () => network.ready();
 document.querySelector('#start-room').onclick = () => network.start();
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = performance.now(); return; }
+  if (!hiddenAt || !online || !matchStarted || matchEnded) return;
+  const missedDrops = Math.min(30, Math.floor((performance.now() - hiddenAt) / players.a.dropInterval));
+  hiddenAt = 0;
+  for (let i = 0; i < missedDrops && players.a.alive; i += 1) {
+    if (!players.a.softDrop()) players.a.lock();
+  }
+  paint('a');
+  network.state(stateOf(players.a));
+});
 
 function paint(key) {
   const player = players[key];
@@ -252,15 +264,7 @@ function loop(now) {
       paint(key);
     }
   });
-  if (online && matchStarted && !matchEnded) {
-    remoteDropClock += delta;
-    if (remoteDropClock >= players.b.dropInterval) {
-      remoteDropClock = 0;
-      if (players.b.alive && !players.b.softDrop()) players.b.lock();
-      paint('b');
-    }
-    if (!players.a.alive) finishMatch('你输了');
-  }
+  if (online && matchStarted && !matchEnded && !players.a.alive) finishMatch('你输了');
   if (online && matchStarted && now - lastStateSent >= 100) {
     lastStateSent = now;
     network.state(stateOf(players.a));

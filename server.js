@@ -71,9 +71,7 @@ class RoomManager {
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
     if (!payload || !['move', 'rotate', 'softDrop', 'hardDrop', 'skill'].includes(payload.type)) throw new Error('INVALID_COMMAND');
     if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
-    const command = { seq: ++room.seq, playerId, payload, at: Date.now() };
-    room.commands.push(command);
-    if (room.commands.length > 200) room.commands.shift();
+    const command = { seq: room.seq + 1, playerId, payload, at: Date.now() };
     if (payload.type === 'skill') {
       const skillCost = payload.skill === 'strike' ? 20 : payload.skill === 'shield' ? 10 : 0;
       const attacker = room.states.get(playerId) || {};
@@ -90,6 +88,9 @@ class RoomManager {
       command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost };
       room.states.set(playerId, attacker);
     }
+    room.seq = command.seq;
+    room.commands.push(command);
+    if (room.commands.length > 200) room.commands.shift();
     return command;
   }
 
@@ -104,6 +105,7 @@ class RoomManager {
       score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
       energy: Number.isFinite(state?.energy) ? Math.max(0, Math.min(100, state.energy)) : previous.energy || 0,
       alive: state?.alive !== false,
+      shield: previous.shield === true,
       board: pending > 0 ? garbageBoard(nextBoard, pending) : nextBoard,
       current: state?.current && Array.isArray(state.current.cells) ? {
         cells: state.current.cells,
@@ -112,6 +114,10 @@ class RoomManager {
         color: String(state.current.color || 'cyan')
       } : previous.current || null
     });
+    if (state?.alive === false && room.status !== 'finished') {
+      room.status = 'finished';
+      room.winnerId = room.players.find(id => id !== playerId) || null;
+    }
     return this.snapshot(room.code);
   }
 
@@ -121,6 +127,7 @@ class RoomManager {
       code: room.code,
       status: room.status,
       countdown: room.countdown,
+      winnerId: room.winnerId || null,
       players: room.players.map(playerId => ({ playerId, ready: room.ready.has(playerId), connected: room.clients.has(playerId), state: room.states.get(playerId) || null })),
       seq: room.seq
     };

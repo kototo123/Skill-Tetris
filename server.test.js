@@ -202,4 +202,26 @@ test('starting a room resets player state and a strike adds garbage to the oppon
   assert.equal(victim.players.find(player => player.playerId === 'guest').state.board.at(-1).some(cell => cell === 8), true);
 });
 
+test('preserves shield across state snapshots and rejects an unaffordable skill without recording it', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  manager.updateState(room.code, 'host', { energy: 10, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'shield' });
+  manager.updateState(room.code, 'host', { score: 3, energy: 0, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  assert.equal(room.states.get('host').shield, true);
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' }), /INSUFFICIENT_ENERGY/);
+  assert.equal(room.seq, 1);
+  assert.equal(room.commands.length, 1);
+});
+
+test('finishes the room with one authoritative winner when a player dies', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  const snapshot = manager.updateState(room.code, 'guest', { alive: false, board: Array.from({ length: 20 }, () => Array(10).fill(1)) });
+  assert.equal(snapshot.status, 'finished');
+  assert.equal(snapshot.winnerId, 'host');
+});
+
 console.log('server room tests passed');
