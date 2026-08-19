@@ -157,6 +157,32 @@ test('only the host can start a ready room and emits a three second countdown', 
   assert.equal(started.countdown, 3);
 });
 
+test('broadcasts countdown to both connected players', async () => {
+  const { httpServer, wss } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const host = await openSocket(port);
+  const guest = await openSocket(port);
+  const created = nextMessage(host, message => message.type === 'room');
+  host.send(JSON.stringify({ type: 'create' }));
+  const code = (await created).room.code;
+  const joined = nextMessage(guest, message => message.type === 'room');
+  guest.send(JSON.stringify({ type: 'join', code }));
+  await joined;
+  const hostReady = nextMessage(host, message => message.type === 'room' && message.room.status === 'ready');
+  host.send(JSON.stringify({ type: 'ready' }));
+  guest.send(JSON.stringify({ type: 'ready' }));
+  await hostReady;
+  const hostCountdown = nextMessage(host, message => message.type === 'countdown');
+  const guestCountdown = nextMessage(guest, message => message.type === 'countdown');
+  host.send(JSON.stringify({ type: 'start' }));
+  assert.equal((await hostCountdown).countdown, 3);
+  assert.equal((await guestCountdown).countdown, 3);
+  host.terminate(); guest.terminate();
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
+});
+
 test('starting a room resets player state and a strike adds garbage to the opponent', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');

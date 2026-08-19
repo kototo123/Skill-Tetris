@@ -65,8 +65,9 @@ function runCountdown(seconds = 3) {
   countdownRunning = true;
   resetMatch();
   const overlay = document.querySelector('#countdown');
-  overlay.hidden = false;
-  overlay.style.display = 'grid';
+  overlay.removeAttribute('hidden');
+  overlay.style.setProperty('display', 'grid', 'important');
+  overlay.style.setProperty('visibility', 'visible', 'important');
   let value = seconds;
   overlay.textContent = value;
   const timer = setInterval(() => {
@@ -75,7 +76,7 @@ function runCountdown(seconds = 3) {
     else {
       clearInterval(timer);
       overlay.textContent = 'GO';
-      setTimeout(() => { overlay.hidden = true; overlay.style.display = 'none'; countdownRunning = false; matchStarted = true; }, 450);
+      setTimeout(() => { overlay.setAttribute('hidden', ''); overlay.style.setProperty('display', 'none', 'important'); countdownRunning = false; matchStarted = true; }, 450);
     }
   }, 1000);
 }
