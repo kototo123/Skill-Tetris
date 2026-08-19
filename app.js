@@ -24,12 +24,12 @@ function log(message) {
 
 function animateSkill(skill, actorId) {
   const isSelf = actorId === selfId;
-  const targetKey = skill === 'strike' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
+  const targetKey = skill === 'jam' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
   const target = document.querySelector('#board-' + targetKey)?.closest('.player');
   if (!target) return;
   const toast = document.querySelector('#skill-toast');
   const flash = document.querySelector('#screen-flash');
-  const label = skill === 'strike' ? (isSelf ? '电弧轰击！' : '对手释放电弧轰击') : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
+  const label = skill === 'jam' ? (isSelf ? '干扰锁定！' : '对手锁定了你的方块') : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
   toast.textContent = label;
   toast.classList.remove('show');
   flash.classList.remove('show');
@@ -37,7 +37,7 @@ function animateSkill(skill, actorId) {
   void target.offsetWidth;
   void toast.offsetWidth;
   toast.classList.add('show');
-  if (skill === 'strike') {
+  if (skill === 'jam') {
     target.classList.add(isSelf ? 'skill-cast' : 'skill-hit');
     flash.classList.add('show');
   } else {
@@ -54,6 +54,7 @@ function applyRemoteState(state) {
   remote.score = state.score || 0;
   remote.energy = state.energy || 0;
   remote.alive = state.alive !== false;
+  remote.jammed = state.jammed === true;
   if (state.current) {
     remote.current = { name: 'remote', cells: state.current.cells, color: state.current.color };
     remote.x = state.current.x;
@@ -152,7 +153,7 @@ const network = new MatchClient({
     }
     if (event.type === 'countdown') { showCountdown(event.countdown || 3); runCountdown(event.countdown || 3); }
     if (event.type === 'command' && event.payload?.type === 'skill') {
-      const name = event.payload.skill === 'strike' ? '电弧轰击' : '棱镜护盾';
+      const name = event.payload.skill === 'jam' ? '干扰锁定' : event.payload.skill === 'cleanse' ? '净化' : '棱镜护盾';
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
       if (event.effect?.targetId === selfId && event.effect.garbageLines > 0) {
         players.a.board = addGarbageLines(players.a.board, event.effect.garbageLines);
@@ -161,6 +162,11 @@ const network = new MatchClient({
       if (event.effect?.targetId === selfId && event.effect.cleanse > 0) {
         players.a.board = cleanseBoard(players.a.board, event.effect.cleanse);
         paint('a');
+      }
+      if (event.effect?.targetId === selfId && event.effect?.jammed) {
+        players.a.jammed = true;
+        paint('a');
+        log('你的当前方块被锁定，暂时无法旋转');
       }
       if (event.effect?.blocked) log('护盾抵挡了这次攻击');
     }
@@ -219,7 +225,7 @@ function paint(key) {
   document.querySelector('#energy-' + key).textContent = `${player.energy} / 100`;
   document.querySelector('#fill-' + key).style.width = `${player.energy}%`;
   document.querySelectorAll(`.skill[data-player="${key}"]`).forEach(button => {
-    const cost = button.dataset.skill === 'strike' ? 20 : 10;
+    const cost = 10;
     button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || player.energy < cost || !player.alive;
   });
 }
@@ -239,7 +245,7 @@ function act(key, action) {
   if (!player.alive) return;
   if (action === 'left') player.move(-1);
   if (action === 'right') player.move(1);
-  if (action === 'rotate') player.rotate();
+  if (action === 'rotate' && !player.jammed) player.rotate();
   if (action === 'drop') player.softDrop();
   if (action === 'hard') player.hardDrop();
   if (online) network.command(commandFor(action));
@@ -269,7 +275,7 @@ document.querySelectorAll('.skill').forEach(button => {
     if (online && key !== 'a') return;
     if (online && (roomStatus !== 'playing' || matchEnded)) return;
     const player = players[key];
-    const cost = button.dataset.skill === 'strike' ? 20 : 10;
+    const cost = 10;
     if (player.energy < cost) return;
     player.energy -= cost;
     if (button.dataset.skill === 'shield') player.shield = true;
@@ -298,7 +304,7 @@ function cleanseBoard(board, count) {
 
 function stateOf(player) {
   return {
-    score: player.score, energy: player.energy, alive: player.alive, board: player.board,
+    score: player.score, energy: player.energy, alive: player.alive, jammed: player.jammed === true, board: player.board,
     current: { cells: player.current.cells, x: player.x, y: player.y, color: player.current.color }
   };
 }

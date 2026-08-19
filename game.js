@@ -74,6 +74,7 @@
       this.combo = 0;
       this.alive = true;
       this.shield = false;
+      this.jammed = false;
       this.dropInterval = 760;
       this.lastDrop = 0;
     }
@@ -88,6 +89,7 @@
 
     move(dx) { if (!collides(this.board, this.current.cells, this.x + dx, this.y)) this.x += dx; }
     rotate() {
+      if (this.jammed) return;
       const next = rotate(this.current.cells);
       if (!collides(this.board, next, this.x, this.y)) this.current.cells = next;
     }
@@ -103,6 +105,7 @@
         this.energy = Math.min(100, this.energy + result.lines * 18 + this.combo * 4);
       } else this.combo = 0;
       this.spawn();
+      this.jammed = false;
       return result.lines;
     }
   }

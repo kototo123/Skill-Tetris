@@ -185,7 +185,7 @@ test('broadcasts countdown to both connected players', async () => {
   await new Promise(resolve => httpServer.close(resolve));
 });
 
-test('starting a room resets player state and a strike adds garbage to the opponent', () => {
+test('starting a room resets player state and jam locks the opponent piece', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
@@ -196,11 +196,12 @@ test('starting a room resets player state and a strike adds garbage to the oppon
   room.status = 'playing';
   assert.equal(room.states.get('host').score, 0);
   assert.equal(room.states.get('host').alive, true);
-  manager.updateState(room.code, 'host', { energy: 20, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
-  const strike = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
-  assert.equal(strike.effect.cost, 20);
+  manager.updateState(room.code, 'host', { energy: 10, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  const strike = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
+  assert.equal(strike.effect.cost, 10);
   assert.equal(room.states.get('host').energy, 0);
-  assert.equal(strike.effect.garbageLines, 2);
+  assert.equal(strike.effect.jammed, true);
+  assert.equal(room.states.get('guest').jammed, true);
 });
 
 test('preserves shield across state snapshots and rejects an unaffordable skill without recording it', () => {
@@ -212,7 +213,7 @@ test('preserves shield across state snapshots and rejects an unaffordable skill 
   manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'shield' });
   manager.updateState(room.code, 'host', { score: 3, energy: 0, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
   assert.equal(room.states.get('host').shield, true);
-  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' }), /INSUFFICIENT_ENERGY/);
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' }), /INSUFFICIENT_ENERGY/);
   assert.equal(room.seq, 1);
   assert.equal(room.commands.length, 1);
 });
@@ -227,18 +228,18 @@ test('finishes the room with one authoritative winner when a player dies', () =>
   assert.equal(snapshot.winnerId, 'host');
 });
 
-test('blocks commands outside active play and reports whether a shield stopped a strike', () => {
+test('blocks commands outside active play and reports jam target', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'move', direction: 1 }), /MATCH_NOT_PLAYING/);
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 20 });
+  manager.updateState(room.code, 'host', { energy: 10 });
   manager.updateState(room.code, 'guest', { energy: 10 });
   manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'shield' });
-  const blocked = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
-  assert.equal(blocked.effect.blocked, true);
-  assert.equal(blocked.effect.garbageLines, 0);
+  const blocked = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
+  assert.equal(blocked.effect.jammed, true);
+  assert.equal(blocked.effect.targetId, 'guest');
   room.status = 'finished';
   assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'hardDrop' }), /MATCH_NOT_PLAYING/);
 });
@@ -277,14 +278,14 @@ test('notifies the remaining player when the opponent disconnects', async () => 
   await new Promise(resolve => httpServer.close(resolve));
 });
 
-test('accepts cleanse as a real low-cost skill', () => {
+test('accepts jam as a real low-cost skill', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
   manager.updateState(room.code, 'host', { energy: 10 });
-  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
-  assert.equal(command.effect.cleanse, 2);
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
+  assert.equal(command.effect.jammed, true);
   assert.equal(room.states.get('host').energy, 0);
 });
 
