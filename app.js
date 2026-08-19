@@ -118,6 +118,10 @@ const network = new MatchClient({
       if (opponent) applyRemoteState(opponent.state);
     }
     if (event.type === 'countdown') runCountdown(event.countdown || 3);
+    if (event.type === 'command' && event.payload?.type === 'skill') {
+      const name = event.payload.skill === 'strike' ? '电弧轰击' : '棱镜护盾';
+      log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
+    }
     if (event.type === 'error') log(`network error: ${event.code}`);
   }
 });

@@ -167,8 +167,13 @@ test('starting a room resets player state and a strike adds garbage to the oppon
   manager.startRoom(room.code, 'host');
   assert.equal(room.states.get('host').score, 0);
   assert.equal(room.states.get('host').alive, true);
-  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
-  assert.equal(room.states.get('guest').board.at(-1).some(cell => cell === 8), true);
+  manager.updateState(room.code, 'host', { energy: 20, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  const strike = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
+  assert.equal(strike.effect.cost, 20);
+  assert.equal(room.states.get('host').energy, 0);
+  assert.equal(room.pendingGarbage.get('guest'), 2);
+  const victim = manager.updateState(room.code, 'guest', { board: Array.from({ length: 20 }, () => Array(10).fill(1)) });
+  assert.equal(victim.players.find(player => player.playerId === 'guest').state.board.at(-1).some(cell => cell === 8), true);
 });
 
 console.log('server room tests passed');

@@ -28,8 +28,9 @@ class RoomManager {
   createRoom(playerId) {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
-    const room = { code, hostId: playerId, status: 'waiting', countdown: 0, players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
+    const room = { code, hostId: playerId, status: 'waiting', countdown: 0, players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), pendingGarbage: new Map(), disconnected: new Map() };
     room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
+    room.pendingGarbage.set(playerId, 0);
     this.rooms.set(code, room);
     return room;
   }
@@ -41,6 +42,7 @@ class RoomManager {
     if (room.players.length >= 2) throw new Error('ROOM_FULL');
     room.players.push(playerId);
     room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
+    room.pendingGarbage.set(playerId, 0);
     return room;
   }
 
@@ -58,7 +60,7 @@ class RoomManager {
     if (room.players.length !== 2 || room.ready.size !== 2) throw new Error('NOT_READY');
     room.status = 'countdown';
     room.countdown = 3;
-    room.players.forEach(id => room.states.set(id, { score: 0, energy: 0, alive: true, board: null, current: null }));
+    room.players.forEach(id => { room.states.set(id, { score: 0, energy: 0, alive: true, board: null, current: null }); room.pendingGarbage.set(id, 0); });
     room.commands = [];
     room.seq = 0;
     return room;
@@ -72,13 +74,21 @@ class RoomManager {
     const command = { seq: ++room.seq, playerId, payload, at: Date.now() };
     room.commands.push(command);
     if (room.commands.length > 200) room.commands.shift();
-    if (payload.type === 'skill' && payload.skill === 'strike') {
+    if (payload.type === 'skill') {
+      const skillCost = payload.skill === 'strike' ? 20 : payload.skill === 'shield' ? 10 : 0;
+      const attacker = room.states.get(playerId) || {};
+      if (!skillCost || (attacker.energy || 0) < skillCost) throw new Error('INSUFFICIENT_ENERGY');
+      attacker.energy -= skillCost;
+      attacker.shield = payload.skill === 'shield';
       const opponentId = room.players.find(id => id !== playerId);
-      if (opponentId) {
+      if (opponentId && payload.skill === 'strike') {
         const opponent = room.states.get(opponentId) || {};
-        opponent.board = garbageBoard(opponent.board, 2);
+        if (opponent.shield) opponent.shield = false;
+        else room.pendingGarbage.set(opponentId, (room.pendingGarbage.get(opponentId) || 0) + 2);
         room.states.set(opponentId, opponent);
       }
+      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost };
+      room.states.set(playerId, attacker);
     }
     return command;
   }
@@ -87,11 +97,14 @@ class RoomManager {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
     const previous = room.states.get(playerId) || {};
+    const pending = room.pendingGarbage.get(playerId) || 0;
+    const nextBoard = Array.isArray(state?.board) ? state.board : previous.board;
+    if (pending > 0) room.pendingGarbage.set(playerId, 0);
     room.states.set(playerId, {
       score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
       energy: Number.isFinite(state?.energy) ? Math.max(0, Math.min(100, state.energy)) : previous.energy || 0,
       alive: state?.alive !== false,
-      board: Array.isArray(state?.board) ? state.board : previous.board,
+      board: pending > 0 ? garbageBoard(nextBoard, pending) : nextBoard,
       current: state?.current && Array.isArray(state.current.cells) ? {
         cells: state.current.cells,
         x: Number.isFinite(state.current.x) ? state.current.x : 0,
