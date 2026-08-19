@@ -152,15 +152,17 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill') {
       const name = event.payload.skill === 'strike' ? '电弧轰击' : '棱镜护盾';
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
-      if (event.effect?.targetId === selfId && event.effect.skill === 'strike') {
-        players.a.board = addGarbageLines(players.a.board, 2);
+      if (event.effect?.targetId === selfId && event.effect.garbageLines > 0) {
+        players.a.board = addGarbageLines(players.a.board, event.effect.garbageLines);
         paint('a');
       }
+      if (event.effect?.blocked) log('护盾抵挡了这次攻击');
     }
     if (event.type === 'command' && event.payload?.type === 'skill') {
       animateSkill(event.payload.skill, event.playerId);
     }
     if (event.type === 'error') log(`network error: ${event.code}`);
+    if (event.disconnectedId && event.disconnectedId !== selfId) log('对手已离线');
   }
 });
 
@@ -198,7 +200,7 @@ function paint(key) {
   document.querySelector('#fill-' + key).style.width = `${player.energy}%`;
   document.querySelectorAll(`.skill[data-player="${key}"]`).forEach(button => {
     const cost = button.dataset.skill === 'strike' ? 20 : 10;
-    button.disabled = (online && key === 'b') || player.energy < cost || !player.alive;
+    button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || player.energy < cost || !player.alive;
   });
 }
 
@@ -211,7 +213,7 @@ function commandFor(action) {
 
 function act(key, action) {
   if (online && key !== 'a') return;
-  if (online && !matchStarted) return;
+  if (online && (!matchStarted || matchEnded)) return;
   const player = players[key];
   if (!player.alive) return;
   if (action === 'left') player.move(-1);
@@ -231,12 +233,16 @@ document.querySelectorAll('.skill').forEach(button => {
   button.onclick = () => {
     const key = button.dataset.player;
     if (online && key !== 'a') return;
+    if (online && (!matchStarted || matchEnded)) return;
     const player = players[key];
     const cost = button.dataset.skill === 'strike' ? 20 : 10;
     if (player.energy < cost) return;
     player.energy -= cost;
     if (button.dataset.skill === 'shield') player.shield = true;
-    if (online) network.command({ type: 'skill', skill: button.dataset.skill });
+    if (online) {
+      network.state(stateOf(player));
+      network.command({ type: 'skill', skill: button.dataset.skill });
+    }
     paint('a'); paint('b');
   };
 });

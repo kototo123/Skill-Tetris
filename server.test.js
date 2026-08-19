@@ -22,6 +22,7 @@ test('joins a room by code and reaches ready when both players ready', () => {
 test('records ordered player commands', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('p1');
+  room.status = 'playing';
   manager.recordCommand(room.code, 'p1', { type: 'move', direction: 1 });
   assert.deepEqual(room.commands[0].payload, { type: 'move', direction: 1 });
   assert.equal(room.commands[0].seq, 1);
@@ -31,6 +32,7 @@ test('rejects malformed commands and exposes authoritative snapshots', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('p1');
   manager.joinRoom(room.code, 'p2');
+  room.status = 'playing';
   assert.throws(() => manager.recordCommand(room.code, 'p1', { type: 'move', direction: 0 }), /INVALID_DIRECTION/);
   manager.recordCommand(room.code, 'p1', { type: 'hardDrop' });
   const snapshot = manager.updateState(room.code, 'p1', { score: 12, energy: 150, alive: true, board: [[1]] });
@@ -191,21 +193,21 @@ test('starting a room resets player state and a strike adds garbage to the oppon
   manager.setReady(room.code, 'host');
   manager.setReady(room.code, 'guest');
   manager.startRoom(room.code, 'host');
+  room.status = 'playing';
   assert.equal(room.states.get('host').score, 0);
   assert.equal(room.states.get('host').alive, true);
   manager.updateState(room.code, 'host', { energy: 20, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
   const strike = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
   assert.equal(strike.effect.cost, 20);
   assert.equal(room.states.get('host').energy, 0);
-  assert.equal(room.pendingGarbage.get('guest'), 2);
-  const victim = manager.updateState(room.code, 'guest', { board: Array.from({ length: 20 }, () => Array(10).fill(1)) });
-  assert.equal(victim.players.find(player => player.playerId === 'guest').state.board.at(-1).some(cell => cell === 8), true);
+  assert.equal(strike.effect.garbageLines, 2);
 });
 
 test('preserves shield across state snapshots and rejects an unaffordable skill without recording it', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
   manager.updateState(room.code, 'host', { energy: 10, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
   manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'shield' });
   manager.updateState(room.code, 'host', { score: 3, energy: 0, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
@@ -219,9 +221,60 @@ test('finishes the room with one authoritative winner when a player dies', () =>
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
   const snapshot = manager.updateState(room.code, 'guest', { alive: false, board: Array.from({ length: 20 }, () => Array(10).fill(1)) });
   assert.equal(snapshot.status, 'finished');
   assert.equal(snapshot.winnerId, 'host');
+});
+
+test('blocks commands outside active play and reports whether a shield stopped a strike', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'move', direction: 1 }), /MATCH_NOT_PLAYING/);
+  room.status = 'playing';
+  manager.updateState(room.code, 'host', { energy: 20 });
+  manager.updateState(room.code, 'guest', { energy: 10 });
+  manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'shield' });
+  const blocked = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'strike' });
+  assert.equal(blocked.effect.blocked, true);
+  assert.equal(blocked.effect.garbageLines, 0);
+  room.status = 'finished';
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'hardDrop' }), /MATCH_NOT_PLAYING/);
+});
+
+test('enforces room state transitions for ready start and finish', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  manager.updateState(room.code, 'guest', { alive: false });
+  assert.equal(room.status, 'waiting');
+  manager.setReady(room.code, 'host');
+  manager.setReady(room.code, 'guest');
+  manager.startRoom(room.code, 'host');
+  assert.throws(() => manager.startRoom(room.code, 'host'), /MATCH_ALREADY_STARTED/);
+  assert.throws(() => manager.setReady(room.code, 'host'), /READY_NOT_ALLOWED/);
+});
+
+test('notifies the remaining player when the opponent disconnects', async () => {
+  const { httpServer, wss } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const host = await openSocket(port);
+  const guest = await openSocket(port);
+  const created = nextMessage(host, message => message.type === 'room');
+  host.send(JSON.stringify({ type: 'create' }));
+  const code = (await created).room.code;
+  const joined = nextMessage(guest, message => message.type === 'room');
+  guest.send(JSON.stringify({ type: 'join', code }));
+  const guestRoom = await joined;
+  const disconnected = nextMessage(host, message => message.disconnectedId === guestRoom.selfId);
+  guest.close();
+  const notice = await disconnected;
+  assert.equal(notice.room.players.find(player => player.playerId === guestRoom.selfId).connected, false);
+  host.terminate();
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
 });
 
 console.log('server room tests passed');

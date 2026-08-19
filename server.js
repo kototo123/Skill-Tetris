@@ -10,27 +10,14 @@ function makeCode() {
   return code;
 }
 
-function garbageBoard(board, count = 2) {
-  if (!Array.isArray(board) || !board.length) board = Array.from({ length: 20 }, () => Array(10).fill(0));
-  const width = board[0].length || 10;
-  const result = board.slice(count).map(row => row.slice());
-  for (let i = 0; i < count; i += 1) {
-    const row = Array(width).fill(8);
-    row[Math.floor(Math.random() * width)] = 0;
-    result.push(row);
-  }
-  return result;
-}
-
 class RoomManager {
   constructor() { this.rooms = new Map(); }
 
   createRoom(playerId) {
     let code = makeCode();
     while (this.rooms.has(code)) code = makeCode();
-    const room = { code, hostId: playerId, status: 'waiting', countdown: 0, players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), pendingGarbage: new Map(), disconnected: new Map() };
+    const room = { code, hostId: playerId, status: 'waiting', countdown: 0, players: [playerId], ready: new Set(), commands: [], seq: 0, clients: new Map(), states: new Map(), disconnected: new Map() };
     room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
-    room.pendingGarbage.set(playerId, 0);
     this.rooms.set(code, room);
     return room;
   }
@@ -42,13 +29,13 @@ class RoomManager {
     if (room.players.length >= 2) throw new Error('ROOM_FULL');
     room.players.push(playerId);
     room.states.set(playerId, { score: 0, energy: 0, alive: true, board: null, current: null });
-    room.pendingGarbage.set(playerId, 0);
     return room;
   }
 
   setReady(code, playerId) {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
+    if (!['waiting', 'ready'].includes(room.status)) throw new Error('READY_NOT_ALLOWED');
     room.ready.add(playerId);
     if (room.ready.size === 2) room.status = 'ready';
     return room;
@@ -57,10 +44,11 @@ class RoomManager {
   startRoom(code, playerId) {
     const room = this.getRoom(code);
     if (room.hostId !== playerId) throw new Error('ONLY_HOST');
+    if (['countdown', 'playing', 'finished'].includes(room.status)) throw new Error('MATCH_ALREADY_STARTED');
     if (room.players.length !== 2 || room.ready.size !== 2) throw new Error('NOT_READY');
     room.status = 'countdown';
     room.countdown = 3;
-    room.players.forEach(id => { room.states.set(id, { score: 0, energy: 0, alive: true, board: null, current: null }); room.pendingGarbage.set(id, 0); });
+    room.players.forEach(id => room.states.set(id, { score: 0, energy: 0, alive: true, board: null, current: null }));
     room.commands = [];
     room.seq = 0;
     return room;
@@ -69,6 +57,7 @@ class RoomManager {
   recordCommand(code, playerId, payload) {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
+    if (room.status !== 'playing') throw new Error('MATCH_NOT_PLAYING');
     if (!payload || !['move', 'rotate', 'softDrop', 'hardDrop', 'skill'].includes(payload.type)) throw new Error('INVALID_COMMAND');
     if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
     const command = { seq: room.seq + 1, playerId, payload, at: Date.now() };
@@ -79,13 +68,13 @@ class RoomManager {
       attacker.energy -= skillCost;
       attacker.shield = payload.skill === 'shield';
       const opponentId = room.players.find(id => id !== playerId);
+      let blocked = false;
       if (opponentId && payload.skill === 'strike') {
         const opponent = room.states.get(opponentId) || {};
-        if (opponent.shield) opponent.shield = false;
-        else room.pendingGarbage.set(opponentId, (room.pendingGarbage.get(opponentId) || 0) + 2);
+        if (opponent.shield) { opponent.shield = false; blocked = true; }
         room.states.set(opponentId, opponent);
       }
-      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost };
+      command.effect = { skill: payload.skill, targetId: opponentId, cost: skillCost, blocked, garbageLines: payload.skill === 'strike' && !blocked ? 2 : 0 };
       room.states.set(playerId, attacker);
     }
     room.seq = command.seq;
@@ -98,15 +87,13 @@ class RoomManager {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
     const previous = room.states.get(playerId) || {};
-    const pending = room.pendingGarbage.get(playerId) || 0;
     const nextBoard = Array.isArray(state?.board) ? state.board : previous.board;
-    if (pending > 0) room.pendingGarbage.set(playerId, 0);
     room.states.set(playerId, {
       score: Number.isFinite(state?.score) ? state.score : previous.score || 0,
       energy: Number.isFinite(state?.energy) ? Math.max(0, Math.min(100, state.energy)) : previous.energy || 0,
       alive: state?.alive !== false,
       shield: previous.shield === true,
-      board: pending > 0 ? garbageBoard(nextBoard, pending) : nextBoard,
+      board: nextBoard,
       current: state?.current && Array.isArray(state.current.cells) ? {
         cells: state.current.cells,
         x: Number.isFinite(state.current.x) ? state.current.x : 0,
@@ -114,7 +101,7 @@ class RoomManager {
         color: String(state.current.color || 'cyan')
       } : previous.current || null
     });
-    if (state?.alive === false && room.status !== 'finished') {
+    if (state?.alive === false && room.status === 'playing') {
       room.status = 'finished';
       room.winnerId = room.players.find(id => id !== playerId) || null;
     }
@@ -191,7 +178,14 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         }
       } catch (error) { send({ type: 'error', code: error.message }); }
     });
-    socket.on('close', () => { if (room) room.clients.delete(playerId); });
+    socket.on('close', () => {
+      if (!room) return;
+      room.clients.delete(playerId);
+      const event = { type: 'room', room: manager.snapshot(room.code), disconnectedId: playerId };
+      room.clients.forEach((client, clientId) => {
+        if (client.readyState === 1) client.send(JSON.stringify({ ...event, selfId: clientId }));
+      });
+    });
   });
   return { httpServer, manager, wss };
 }
