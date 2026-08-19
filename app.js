@@ -172,17 +172,16 @@ const wsUrl = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.hos
 function bindTap(selector, action) {
   const button = document.querySelector(selector);
   let lastTouch = 0;
-  button.addEventListener('pointerup', event => {
-    if (event.pointerType === 'mouse') return;
-    event.preventDefault();
-    lastTouch = Date.now();
-    action();
-  }, { passive: false });
-  button.addEventListener('click', event => {
+  button.onclick = event => {
     if (Date.now() - lastTouch < 500) return;
     event.preventDefault();
     action();
-  });
+  };
+  button.ontouchend = event => {
+    event.preventDefault();
+    lastTouch = Date.now();
+    action();
+  };
 }
 bindTap('#create-room', () => { network.connect(wsUrl); network.create(); });
 bindTap('#join-room', () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); });
@@ -245,20 +244,19 @@ function act(key, action) {
 
 document.querySelectorAll('.controls button').forEach(button => {
   let lastTouch = 0;
-  const trigger = () => {
+  const trigger = event => {
+    event?.preventDefault();
     act(button.parentElement.dataset.player, button.dataset.action);
   };
-  button.addEventListener('pointerup', event => {
-    if (event.pointerType === 'mouse') return;
-    event.preventDefault();
+  button.onclick = trigger;
+  button.ontouchend = event => {
     lastTouch = Date.now();
-    trigger();
-  }, { passive: false });
-  button.addEventListener('click', event => {
+    trigger(event);
+  };
+  button.onclick = event => {
     if (Date.now() - lastTouch < 500) return;
-    event.preventDefault();
-    trigger();
-  });
+    trigger(event);
+  };
 });
 
 document.querySelectorAll('.skill').forEach(button => {
