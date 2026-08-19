@@ -283,8 +283,7 @@ document.querySelectorAll('.controls button').forEach(button => {
   };
 });
 
-document.querySelectorAll('.skill').forEach(button => {
-  bindTapSkill(button, () => {
+function useSkill(button) {
     const key = button.dataset.player;
     if (online && key !== 'a') return;
     if (online && (roomStatus !== 'playing' || matchEnded)) return;
@@ -303,7 +302,22 @@ document.querySelectorAll('.skill').forEach(button => {
     }
     log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
     paint('a'); paint('b');
-  });
+}
+
+let lastSkillPointer = 0;
+document.addEventListener('pointerup', event => {
+  const button = event.target.closest?.('.skill');
+  if (!button) return;
+  event.preventDefault();
+  lastSkillPointer = Date.now();
+  useSkill(button);
+}, { passive: false });
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('.skill');
+  if (!button) return;
+  if (Date.now() - lastSkillPointer < 600) return;
+  event.preventDefault();
+  useSkill(button);
 });
 
 function bindTapSkill(button, action) {
