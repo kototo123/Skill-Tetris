@@ -226,7 +226,17 @@ function act(key, action) {
 }
 
 document.querySelectorAll('.controls button').forEach(button => {
-  button.onclick = () => act(button.parentElement.dataset.player, button.dataset.action);
+  let lastTouch = 0;
+  const trigger = event => {
+    if (event) event.preventDefault();
+    const now = Date.now();
+    if (now - lastTouch < 120) return;
+    lastTouch = now;
+    act(button.parentElement.dataset.player, button.dataset.action);
+  };
+  button.addEventListener('pointerdown', trigger, { passive: false });
+  button.addEventListener('touchstart', trigger, { passive: false });
+  button.addEventListener('click', trigger);
 });
 
 document.querySelectorAll('.skill').forEach(button => {
