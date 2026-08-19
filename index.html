@@ -8,6 +8,38 @@
     :root{--bg:#10131b;--panel:#171d29;--line:#2e3a50;--text:#f5f7fb;--muted:#9ba7ba;--cyan:#38d6e5;--pink:#ff5b8d}
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:14px system-ui,sans-serif}.app{max-width:700px;margin:auto;padding:14px 10px 28px}header{display:flex;justify-content:space-between;gap:12px;align-items:start;margin-bottom:12px}h1{font-size:27px;margin:0}.eyebrow{font-size:11px;letter-spacing:.16em;color:var(--cyan);text-transform:uppercase}.status{font-size:11px;color:var(--muted);text-align:right}.online{display:flex;flex-wrap:wrap;gap:6px;padding:9px;border:1px solid var(--line);background:var(--panel);margin-bottom:10px}.online input,.online button{min-height:36px;border:1px solid var(--line);background:#202a3b;color:var(--text);padding:7px 9px}.online input{width:100px;text-transform:uppercase}.online .primary{background:var(--cyan);color:#081218;font-weight:800}.online-status{color:var(--muted);font-size:11px;align-self:center}.arena{display:grid;grid-template-columns:1fr 1fr;gap:10px}.player{background:var(--panel);border:1px solid var(--line);padding:9px}.player-head{display:flex;justify-content:space-between;margin-bottom:7px}.tag{font-size:12px;color:var(--muted)}.board{display:grid;grid-template-columns:repeat(10,1fr);aspect-ratio:1/2;border:2px solid #354157;background:#0b0e14;gap:1px;padding:3px}.cell{background:#111722;border-radius:2px}.cell.filled{box-shadow:inset 0 2px #ffffff44,0 0 6px #ffffff22}.cyan{background:#37d8e7}.yellow{background:#f5c84b}.purple{background:#b57cff}.orange{background:#ff9a4d}.blue{background:#5687ff}.green{background:#5ed387}.red{background:#ff647e}.garbage{background:#586273}.meter{margin-top:7px}.meter-line{display:flex;justify-content:space-between;color:var(--muted);font-size:11px}.meter-bar{height:7px;background:#0d1119;border:1px solid #293346}.meter-fill{height:100%;background:var(--cyan)}.controls{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-top:7px}.controls button{min-height:38px;background:#202a3b;color:var(--text);border:1px solid var(--line);font-size:17px;touch-action:manipulation}.controls .wide{grid-column:span 2;font-size:13px}.center{grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:8px}.center-panel{background:var(--panel);border:1px solid var(--line);padding:9px}.center-panel h2{font-size:12px;color:var(--muted);margin:0 0 6px}.log{height:58px;overflow:auto;font-size:11px;color:var(--muted)}.log p{margin:0 0 4px}.skills{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:7px}.skill{min-height:48px;text-align:left;background:#202a3b;color:var(--text);border:1px solid var(--line);font-size:11px}.skill:disabled{opacity:.4}.skill small{display:block;color:var(--muted)}
     @media(min-width:600px){.app{padding-top:24px}.arena{grid-template-columns:1fr 1fr}.board{max-width:240px;margin:auto}}
+    @media(max-width:599px){
+      html,body{width:100%;height:100%;overflow:hidden}
+      body{background:#0d1118}
+      .app{height:100dvh;min-height:0;overflow:hidden;padding:6px 6px 8px;display:flex;flex-direction:column;gap:5px}
+      header{flex:0 0 auto;align-items:center;margin:0;height:31px;gap:6px}
+      .eyebrow{font-size:8px;letter-spacing:.1em;line-height:1}
+      h1{font-size:18px;line-height:1.1}
+      .status{font-size:9px;max-width:145px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      .online{flex:0 0 auto;display:grid;grid-template-columns:auto 1fr auto auto auto;gap:4px;margin:0;padding:4px;border-radius:4px;align-items:center}
+      .online button,.online input{min-height:30px;height:30px;padding:3px 6px;font-size:11px}
+      .online input{width:auto;min-width:0}
+      .online-status{grid-column:1/-1;font-size:9px;line-height:11px;min-height:11px}
+      .arena{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:minmax(0,1fr) auto;gap:5px;overflow:hidden}
+      .player{min-width:0;min-height:0;padding:5px;border-radius:4px;display:flex;flex-direction:column;overflow:hidden}
+      .player-head{flex:0 0 auto;margin-bottom:3px;font-size:11px}
+      .player-head strong{font-size:11px}.player-head span{font-size:10px}
+      .board{width:100%;height:auto;max-height:calc(100dvh - 245px);aspect-ratio:1/1.85;flex:0 1 auto;margin:0 auto;border-width:1px;padding:2px;gap:1px}
+      .controls{flex:0 0 auto;grid-template-columns:repeat(4,1fr);gap:3px;margin-top:4px}
+      .controls button{min-height:32px;height:32px;font-size:16px;border-radius:4px;padding:0}
+      .controls .wide{grid-column:span 4;min-height:27px;height:27px;font-size:11px}
+      .meter{flex:0 0 auto;margin-top:4px}.meter-line{font-size:9px;line-height:12px}.meter-bar{height:5px}
+      .skills{flex:0 0 auto;grid-template-columns:1fr 1fr;gap:3px;margin-top:4px}
+      .skill{min-height:35px;height:35px;padding:2px 3px;font-size:9px;border-radius:4px;line-height:12px}
+      .skill small{font-size:8px;line-height:9px}
+      .center{grid-column:1/-1;min-height:0;height:40px;display:grid;grid-template-columns:1fr 1fr;gap:4px;overflow:hidden}
+      .center-panel{min-width:0;padding:4px;border-radius:4px;overflow:hidden}
+      .center-panel h2{font-size:8px;line-height:10px;margin:0 0 2px}
+      .log{height:20px;font-size:8px;line-height:10px}.log p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #snapshot{font-size:9px;line-height:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+      #countdown{font-size:68px!important}
+      #result{font-size:25px!important}
+    }
   </style>
 </head>
 <body><main class="app">
