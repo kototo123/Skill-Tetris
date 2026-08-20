@@ -61,6 +61,7 @@ test('serves the mobile client from the realtime server', async () => {
   assert.match(response.body, /id="lobby-overlay"/);
   assert.match(response.body, /id="countdown-value"/);
   assert.match(response.body, /lobby-overlay[^}]*pointer-events:none/);
+  assert.match(response.body, /\.lobby-overlay\[hidden\]\{display:none!important\}/);
   assert.doesNotMatch(response.body, /连接快照/);
 });
 
