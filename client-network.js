@@ -19,11 +19,12 @@
         this.socket.onclose = () => this.onStatus('offline - practice mode');
         this.socket.onerror = () => this.onStatus('connection failed - practice mode');
         this.socket.onmessage = event => {
-          try {
-            const message = JSON.parse(event.data);
-            if (message.room?.code) this.roomCode = message.room.code;
-            this.onEvent(message);
-          } catch { this.onEvent({ type: 'error', code: 'BAD_SERVER_MESSAGE' }); }
+          let message;
+          try { message = JSON.parse(event.data); }
+          catch { this.onEvent({ type: 'error', code: 'BAD_SERVER_MESSAGE' }); return; }
+          if (message.room?.code) this.roomCode = message.room.code;
+          try { this.onEvent(message); }
+          catch (error) { this.onEvent({ type: 'error', code: 'CLIENT_EVENT_ERROR', detail: error?.message || 'unknown' }); }
         };
       } catch { this.onStatus('connection failed - practice mode'); }
     }

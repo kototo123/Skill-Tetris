@@ -175,8 +175,10 @@ function resetMatch() {
   matchEnded = false;
   matchStarted = false;
   const result = document.querySelector('#result');
-  result.hidden = true;
-  result.style.display = 'none';
+  if (result) {
+    result.hidden = true;
+    result.style.display = 'none';
+  }
   paint('a');
   paint('b');
 }
@@ -185,6 +187,7 @@ function finishMatch(message) {
   if (matchEnded) return;
   matchEnded = true;
   const result = document.querySelector('#result');
+  if (!result) return;
   result.textContent = message;
   result.hidden = false;
   result.style.display = 'grid';
