@@ -14,16 +14,40 @@ let lastStateSent = 0;
 let skillSyncPauseUntil = 0;
 let hiddenAt = 0;
 let roomStatus = 'waiting';
+let lastRoomSignature = '';
 const logEl = document.querySelector('#log');
 const skillNames = { jam: '干扰锁定', reverse: '反向操控', shield: '棱镜护盾', cleanse: '净化' };
 const feedbackEl = document.querySelector('#action-feedback');
+const presenceEl = document.querySelector('#room-presence');
+const roomToastEl = document.querySelector('#room-toast');
 let feedbackTimer = 0;
+let roomToastTimer = 0;
 
 function feedback(message, tone = '') {
   feedbackEl.textContent = message;
   feedbackEl.className = `action-feedback ${tone}`.trim();
   clearTimeout(feedbackTimer);
   feedbackTimer = setTimeout(() => { feedbackEl.className = 'action-feedback'; }, 1200);
+}
+
+function showRoomToast(message) {
+  roomToastEl.textContent = message;
+  roomToastEl.classList.remove('show');
+  clearTimeout(roomToastTimer);
+  void roomToastEl.offsetWidth;
+  roomToastEl.classList.add('show');
+  roomToastTimer = setTimeout(() => roomToastEl.classList.remove('show'), 1900);
+}
+
+function updateRoomPresence(room) {
+  if (!room) return;
+  const players = room.players || [];
+  const self = players.find(player => player.playerId === selfId);
+  const opponent = players.find(player => player.playerId !== selfId);
+  const readyCount = players.filter(player => player.ready).length;
+  const phase = room.status === 'waiting' ? '等待对手加入' : room.status === 'ready' ? '双方已准备，可开始' : room.status === 'countdown' ? '倒计时中' : room.status === 'playing' ? '对战进行中' : room.status === 'finished' ? '对战结束' : room.status;
+  const detail = `${players.length}/2 人 · 准备 ${readyCount}/2${self?.ready ? ' · 我已准备' : ''}${opponent?.ready ? ' · 对手已准备' : ''}`;
+  presenceEl.innerHTML = `<span class="room-phase">${phase}</span><span class="room-players">${detail}</span>`;
 }
 
 function log(message) {
@@ -161,6 +185,14 @@ const network = new MatchClient({
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
       roomStatus = event.room.status;
+      updateRoomPresence(event.room);
+      const signature = `${event.room.status}:${event.room.players.length}:${event.room.players.map(player => `${player.playerId}:${player.ready}`).join('|')}`;
+      if (lastRoomSignature && signature !== lastRoomSignature) {
+        if (event.room.players.length === 2 && !lastRoomSignature.includes(':2:')) showRoomToast('对手已加入房间');
+        else if (event.room.status === 'ready') showRoomToast('双方已准备，房主可以开始');
+        else if (event.room.players.some(player => player.ready)) showRoomToast('准备状态已更新');
+      }
+      lastRoomSignature = signature;
       if (event.room.status === 'countdown') { showCountdown(event.room.countdown || 3); runCountdown(event.room.countdown || 3); }
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
@@ -205,7 +237,7 @@ const network = new MatchClient({
       animateSkill(event.payload.skill, event.playerId);
     }
     if (event.type === 'error') log(`技能/网络错误: ${event.code}`);
-    if (event.disconnectedId && event.disconnectedId !== selfId) log('对手已离线');
+    if (event.disconnectedId && event.disconnectedId !== selfId) { log('对手已离线'); showRoomToast('对手已离开房间'); }
   }
 });
 
