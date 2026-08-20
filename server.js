@@ -130,6 +130,7 @@ class RoomManager {
     if (state?.alive === false && room.status === 'playing') {
       room.status = 'finished';
       room.winnerId = room.players.find(id => id !== playerId) || null;
+      room.ready.clear();
     }
     return this.snapshot(room.code);
   }

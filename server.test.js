@@ -84,7 +84,7 @@ test('serves the synchronized mobile app script', async () => {
   assert.match(response.body, /updateRoomPresence/);
   assert.match(response.body, /showRoomToast/);
   assert.match(response.body, /setRoomView/);
-  assert.match(response.body, /下一局准备/);
+  assert.match(response.body, /readyButton.textContent = selfRoomPlayer/);
 });
 
 test('returns a stable error when a client sends state before joining a room', async () => {

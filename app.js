@@ -226,7 +226,7 @@ const network = new MatchClient({
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
       const readyButton = document.querySelector('#ready-room');
       const selfRoomPlayer = event.room.players.find(player => player.playerId === selfId);
-      readyButton.textContent = event.room.status === 'finished' ? '下一局准备' : selfRoomPlayer?.ready ? '已准备' : '准备';
+      readyButton.textContent = selfRoomPlayer?.ready ? '已准备' : '准备';
       readyButton.disabled = ['countdown', 'playing'].includes(event.room.status) || selfRoomPlayer?.ready === true;
       if (event.room.status === 'playing') { matchStarted = true; setRoomView('playing'); }
       if (event.room.status === 'finished' && event.room.winnerId) finishMatch(event.room.winnerId === selfId ? '你赢了' : '你输了');
