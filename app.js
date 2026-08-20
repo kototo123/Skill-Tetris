@@ -16,6 +16,15 @@ let hiddenAt = 0;
 let roomStatus = 'waiting';
 const logEl = document.querySelector('#log');
 const skillNames = { jam: '干扰锁定', reverse: '反向操控', shield: '棱镜护盾', cleanse: '净化' };
+const feedbackEl = document.querySelector('#action-feedback');
+let feedbackTimer = 0;
+
+function feedback(message, tone = '') {
+  feedbackEl.textContent = message;
+  feedbackEl.className = `action-feedback ${tone}`.trim();
+  clearTimeout(feedbackTimer);
+  feedbackTimer = setTimeout(() => { feedbackEl.className = 'action-feedback'; }, 1200);
+}
 
 function log(message) {
   const item = document.createElement('p');
@@ -215,10 +224,14 @@ function bindTap(selector, action) {
     action();
   };
 }
-bindTap('#create-room', () => { network.connect(wsUrl); network.create(); });
-bindTap('#join-room', () => { network.connect(wsUrl); network.join(document.querySelector('#room-code').value); });
-bindTap('#ready-room', () => network.ready());
-bindTap('#start-room', () => network.start());
+bindTap('#create-room', () => { feedback('正在创建房间...', 'success'); network.connect(wsUrl); network.create(); });
+bindTap('#join-room', () => {
+  const code = document.querySelector('#room-code').value.trim();
+  if (!code) { feedback('请先输入邀请码', 'warn'); return; }
+  feedback('正在加入房间...', 'success'); network.connect(wsUrl); network.join(code);
+});
+bindTap('#ready-room', () => { feedback('已发送准备状态', 'success'); network.ready(); });
+bindTap('#start-room', () => { feedback('正在开始比赛...', 'success'); network.start(); });
 
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) { hiddenAt = performance.now(); return; }
@@ -262,7 +275,7 @@ function commandFor(action) {
 
 function act(key, action) {
   if (online && key !== 'a') return;
-  if (online && roomStatus !== 'playing') { document.querySelector('#snapshot').textContent = '等待比赛开始'; return; }
+  if (online && roomStatus !== 'playing') { document.querySelector('#snapshot').textContent = '等待比赛开始'; feedback('比赛还没有开始', 'warn'); return; }
   if (online && matchEnded) return;
   const player = players[key];
   if (!player.alive) return;
@@ -302,6 +315,7 @@ function useSkill(button) {
     if (player.energy < cost) {
       button.classList.remove('action-denied'); void button.offsetWidth; button.classList.add('action-denied');
       log('能量不足，需要 10 点');
+      feedback(`能量不足：${player.energy} / ${cost}`, 'error');
       return;
     }
     button.classList.remove('action-success'); void button.offsetWidth; button.classList.add('action-success');
@@ -331,6 +345,7 @@ function useSkill(button) {
     }
     if (!localBlocked) animateSkill(button.dataset.skill, online ? selfId : `local-${key}`);
     log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
+    feedback(`已释放 ${skillNames[button.dataset.skill]}，剩余 ${player.energy} 能量`, 'success');
     paint('a'); paint('b');
 }
 
