@@ -300,9 +300,11 @@ function useSkill(button) {
     const player = players[key];
     const cost = 10;
     if (player.energy < cost) {
+      button.classList.remove('action-denied'); void button.offsetWidth; button.classList.add('action-denied');
       log('能量不足，需要 10 点');
       return;
     }
+    button.classList.remove('action-success'); void button.offsetWidth; button.classList.add('action-success');
     player.energy -= cost;
     let localBlocked = false;
     if (!online) {
@@ -347,6 +349,20 @@ document.addEventListener('click', event => {
   event.preventDefault();
   useSkill(button);
 });
+
+document.addEventListener('pointerdown', event => {
+  const button = event.target.closest?.('button');
+  if (!button) return;
+  button.classList.add('is-pressed');
+}, { passive: true });
+document.addEventListener('pointerup', event => {
+  const button = event.target.closest?.('button');
+  if (button) button.classList.remove('is-pressed');
+}, { passive: true });
+document.addEventListener('pointercancel', event => {
+  const button = event.target.closest?.('button');
+  if (button) button.classList.remove('is-pressed');
+}, { passive: true });
 
 function bindTapSkill(button, action) {
   let lastTouch = 0;
