@@ -24,6 +24,7 @@ const lobbyEl = document.querySelector('#lobby-overlay');
 const appEl = document.querySelector('.app');
 let feedbackTimer = 0;
 let roomToastTimer = 0;
+let resultTimer = 0;
 
 function feedback(message, tone = '') {
   feedbackEl.textContent = message;
@@ -53,7 +54,7 @@ function updateRoomPresence(room) {
 }
 
 function setRoomView(status = 'waiting') {
-  const inGame = online && status === 'playing';
+  const inGame = online && (status === 'playing' || status === 'finished');
   appEl.classList.toggle('game-hidden', !inGame);
   lobbyEl.hidden = inGame;
   if (!online) {
@@ -177,8 +178,9 @@ function resetMatch() {
   const result = document.querySelector('#result');
   if (result) {
     result.hidden = true;
-    result.style.display = 'none';
+    result.classList.remove('show', 'loss');
   }
+  clearTimeout(resultTimer);
   paint('a');
   paint('b');
 }
@@ -188,9 +190,17 @@ function finishMatch(message) {
   matchEnded = true;
   const result = document.querySelector('#result');
   if (!result) return;
-  result.textContent = message;
+  result.querySelector('.result-title').textContent = message;
+  result.classList.toggle('loss', message.includes('输'));
+  result.classList.remove('show');
   result.hidden = false;
-  result.style.display = 'grid';
+  void result.offsetWidth;
+  result.classList.add('show');
+  clearTimeout(resultTimer);
+  resultTimer = setTimeout(() => {
+    result.hidden = true;
+    result.classList.remove('show');
+  }, 2250);
 }
 
 const network = new MatchClient({
@@ -214,6 +224,10 @@ const network = new MatchClient({
       if (event.room.status === 'countdown') { showCountdown(event.room.countdown || 3); runCountdown(event.room.countdown || 3); }
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
+      const readyButton = document.querySelector('#ready-room');
+      const selfRoomPlayer = event.room.players.find(player => player.playerId === selfId);
+      readyButton.textContent = event.room.status === 'finished' ? '下一局准备' : selfRoomPlayer?.ready ? '已准备' : '准备';
+      readyButton.disabled = ['countdown', 'playing'].includes(event.room.status) || selfRoomPlayer?.ready === true;
       if (event.room.status === 'playing') { matchStarted = true; setRoomView('playing'); }
       if (event.room.status === 'finished' && event.room.winnerId) finishMatch(event.room.winnerId === selfId ? '你赢了' : '你输了');
       const opponent = event.room.players.find(player => player.playerId !== selfId);

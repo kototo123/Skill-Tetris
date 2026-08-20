@@ -60,6 +60,7 @@ test('serves the mobile client from the realtime server', async () => {
   assert.match(response.body, /id="room-toast"/);
   assert.match(response.body, /id="lobby-overlay"/);
   assert.match(response.body, /id="countdown-value"/);
+  assert.match(response.body, /id="result"/);
   assert.match(response.body, /lobby-overlay[^}]*pointer-events:none/);
   assert.match(response.body, /\.lobby-overlay\[hidden\]\{display:none!important\}/);
   assert.doesNotMatch(response.body, /连接快照/);
@@ -83,6 +84,7 @@ test('serves the synchronized mobile app script', async () => {
   assert.match(response.body, /updateRoomPresence/);
   assert.match(response.body, /showRoomToast/);
   assert.match(response.body, /setRoomView/);
+  assert.match(response.body, /下一局准备/);
 });
 
 test('returns a stable error when a client sends state before joining a room', async () => {
@@ -267,6 +269,17 @@ test('enforces room state transitions for ready start and finish', () => {
   manager.startRoom(room.code, 'host');
   assert.throws(() => manager.startRoom(room.code, 'host'), /MATCH_ALREADY_STARTED/);
   assert.throws(() => manager.setReady(room.code, 'host'), /READY_NOT_ALLOWED/);
+});
+
+test('keeps finished room open and allows both players to prepare a rematch', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'finished';
+  room.winnerId = 'host';
+  assert.equal(manager.setReady(room.code, 'host').status, 'waiting');
+  assert.equal(manager.setReady(room.code, 'guest').status, 'ready');
+  assert.equal(manager.startRoom(room.code, 'host').status, 'countdown');
 });
 
 test('notifies the remaining player when the opponent disconnects', async () => {

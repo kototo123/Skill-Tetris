@@ -35,6 +35,11 @@ class RoomManager {
   setReady(code, playerId) {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
+    if (room.status === 'finished') {
+      room.status = 'waiting';
+      room.winnerId = null;
+      room.ready.clear();
+    }
     if (!['waiting', 'ready'].includes(room.status)) throw new Error('READY_NOT_ALLOWED');
     room.ready.add(playerId);
     if (room.ready.size === 2) room.status = 'ready';
