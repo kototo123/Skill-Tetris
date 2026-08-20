@@ -20,6 +20,8 @@ const skillNames = { jam: '干扰锁定', reverse: '反向操控', shield: '棱�
 const feedbackEl = document.querySelector('#action-feedback');
 const presenceEl = document.querySelector('#room-presence');
 const roomToastEl = document.querySelector('#room-toast');
+const lobbyEl = document.querySelector('#lobby-overlay');
+const appEl = document.querySelector('.app');
 let feedbackTimer = 0;
 let roomToastTimer = 0;
 
@@ -48,6 +50,16 @@ function updateRoomPresence(room) {
   const phase = room.status === 'waiting' ? '等待对手加入' : room.status === 'ready' ? '双方已准备，可开始' : room.status === 'countdown' ? '倒计时中' : room.status === 'playing' ? '对战进行中' : room.status === 'finished' ? '对战结束' : room.status;
   const detail = `${players.length}/2 人 · 准备 ${readyCount}/2${self?.ready ? ' · 我已准备' : ''}${opponent?.ready ? ' · 对手已准备' : ''}`;
   presenceEl.innerHTML = `<span class="room-phase">${phase}</span><span class="room-players">${detail}</span>`;
+}
+
+function setRoomView(status = 'waiting') {
+  const inGame = online && status === 'playing';
+  appEl.classList.toggle('game-hidden', !inGame);
+  lobbyEl.hidden = inGame;
+  if (!online) {
+    presenceEl.innerHTML = '<span class="room-phase">房间模式</span><span class="room-players">请创建或加入房间</span>';
+    lobbyEl.hidden = false;
+  }
 }
 
 function log(message) {
@@ -137,18 +149,20 @@ function runCountdown(seconds = 3) {
   countdownRunning = true;
   resetMatch();
   const overlay = document.querySelector('#countdown');
+  const valueEl = document.querySelector('#countdown-value');
   overlay.removeAttribute('hidden');
-  overlay.style.setProperty('display', 'grid', 'important');
-  overlay.style.setProperty('visibility', 'visible', 'important');
+  overlay.classList.add('visible');
   let value = seconds;
-  overlay.textContent = value;
+  valueEl.textContent = value;
+  valueEl.classList.remove('go');
   const timer = setInterval(() => {
     value -= 1;
-    if (value > 0) overlay.textContent = value;
+    if (value > 0) valueEl.textContent = value;
     else {
       clearInterval(timer);
-      overlay.textContent = 'GO';
-      setTimeout(() => { overlay.setAttribute('hidden', ''); overlay.style.setProperty('display', 'none', 'important'); countdownRunning = false; matchStarted = true; }, 450);
+      valueEl.textContent = 'GO';
+      valueEl.classList.add('go');
+      setTimeout(() => { overlay.setAttribute('hidden', ''); overlay.classList.remove('visible'); countdownRunning = false; matchStarted = true; setRoomView('playing'); }, 650);
     }
   }, 1000);
 }
@@ -185,6 +199,7 @@ const network = new MatchClient({
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
       roomStatus = event.room.status;
+      setRoomView(event.room.status);
       updateRoomPresence(event.room);
       const signature = `${event.room.status}:${event.room.players.length}:${event.room.players.map(player => `${player.playerId}:${player.ready}`).join('|')}`;
       if (lastRoomSignature && signature !== lastRoomSignature) {
@@ -196,7 +211,7 @@ const network = new MatchClient({
       if (event.room.status === 'countdown') { showCountdown(event.room.countdown || 3); runCountdown(event.room.countdown || 3); }
       const startButton = document.querySelector('#start-room');
       startButton.hidden = !(selfId === hostId && event.room.status === 'ready');
-      if (event.room.status === 'playing') matchStarted = true;
+      if (event.room.status === 'playing') { matchStarted = true; setRoomView('playing'); }
       if (event.room.status === 'finished' && event.room.winnerId) finishMatch(event.room.winnerId === selfId ? '你赢了' : '你输了');
       const opponent = event.room.players.find(player => player.playerId !== selfId);
       const self = event.room.players.find(player => player.playerId === selfId);
@@ -236,8 +251,8 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill') {
       animateSkill(event.payload.skill, event.playerId);
     }
-    if (event.type === 'error') log(`技能/网络错误: ${event.code}`);
-    if (event.disconnectedId && event.disconnectedId !== selfId) { log('对手已离线'); showRoomToast('对手已离开房间'); }
+    if (event.type === 'error') { log(`技能/网络错误: ${event.code}`); feedback(`房间操作失败：${event.code}`, 'error'); }
+    if (event.disconnectedId && event.disconnectedId !== selfId) { log('对手已离线'); showRoomToast('对手已离开房间'); setRoomView('waiting'); }
   }
 });
 
@@ -437,7 +452,7 @@ let lastFrame = performance.now();
 function loop(now) {
   const delta = now - lastFrame;
   lastFrame = now;
-  const activeKeys = online ? ['a'] : ['a', 'b'];
+  const activeKeys = online && matchStarted ? ['a'] : [];
   activeKeys.forEach(key => {
     if (online && !matchStarted) return;
     const player = players[key];
@@ -457,4 +472,4 @@ function loop(now) {
   requestAnimationFrame(loop);
 }
 
-paint('a'); paint('b'); setOnlineControls(); log('本地练习已开始'); requestAnimationFrame(loop);
+paint('a'); paint('b'); setOnlineControls(); setRoomView('waiting'); log('请创建或加入房间'); requestAnimationFrame(loop);

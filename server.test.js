@@ -58,6 +58,8 @@ test('serves the mobile client from the realtime server', async () => {
   assert.match(response.body, /Skill Tetris/);
   assert.match(response.body, /id="room-presence"/);
   assert.match(response.body, /id="room-toast"/);
+  assert.match(response.body, /id="lobby-overlay"/);
+  assert.match(response.body, /id="countdown-value"/);
   assert.doesNotMatch(response.body, /连接快照/);
 });
 
@@ -78,6 +80,7 @@ test('serves the synchronized mobile app script', async () => {
   assert.match(response.body, /dropInterval = 760/);
   assert.match(response.body, /updateRoomPresence/);
   assert.match(response.body, /showRoomToast/);
+  assert.match(response.body, /setRoomView/);
 });
 
 test('returns a stable error when a client sends state before joining a room', async () => {
