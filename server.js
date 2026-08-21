@@ -2,6 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { SHAPES } = require('./game.js');
+const { createAiPlayer, playBestMove, stateFromPlayer, applyStateToPlayer } = require('./ai-player.js');
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SKILL_CARDS = ['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'cardSwap', 'reshape', 'store', 'predict', 'reflect', 'clearTop', 'copyBoard', 'drain', 'reroll', 'copy', 'gambler', 'frenzy'];
@@ -105,6 +106,19 @@ class RoomManager {
     return room;
   }
 
+  createAiRoom(playerId) {
+    const room = this.createRoom(playerId);
+    const botId = `ai-${room.code.toLowerCase()}`;
+    room.isAi = true;
+    room.publicCode = 'KTOTO';
+    room.botId = botId;
+    room.aiPlayer = createAiPlayer();
+    room.players.push(botId);
+    room.ready.add(botId);
+    room.states.set(botId, stateFromPlayer(room.aiPlayer));
+    return room;
+  }
+
   joinRoom(code, playerId) {
     const room = this.rooms.get(String(code).toUpperCase());
     if (!room) throw new Error('ROOM_NOT_FOUND');
@@ -127,10 +141,12 @@ class RoomManager {
       room.status = 'waiting';
       room.winnerId = null;
       room.ready.clear();
+      if (room.isAi) room.ready.add(room.botId);
     }
     if (!['waiting', 'ready'].includes(room.status)) throw new Error('READY_NOT_ALLOWED');
     room.ready.add(playerId);
     if (room.ready.size === 2) room.status = 'ready';
+    if (room.isAi && playerId !== room.botId && room.status === 'ready') this.startRoom(room.code, room.hostId);
     return room;
   }
 
@@ -143,8 +159,61 @@ class RoomManager {
     room.countdown = 3;
     room.seq += 1;
     room.players.forEach(id => room.states.set(id, initialState(room.seq)));
+    if (room.isAi) {
+      room.aiPlayer = createAiPlayer();
+      room.aiTickCount = 0;
+      room.states.set(room.botId, stateFromPlayer(room.aiPlayer, room.seq));
+    }
     room.commands = [];
     return room;
+  }
+
+  tickAiRoom(code, random = Math.random) {
+    const room = this.getRoom(code);
+    if (!room.isAi || room.status !== 'playing') return { placement: null, commands: [] };
+    const humanId = room.players.find(id => id !== room.botId);
+    const human = room.states.get(humanId);
+    if (!human || human.alive === false) {
+      room.status = 'finished';
+      room.winnerId = room.botId;
+      room.ready.clear();
+      return { placement: null, commands: [] };
+    }
+
+    const botState = room.states.get(room.botId) || initialState(room.seq);
+    applyStateToPlayer(room.aiPlayer, botState);
+    if (room.aiPlayer.intercept) {
+      room.aiPlayer.spawn();
+      room.aiPlayer.intercept = false;
+    }
+    const placement = playBestMove(room.aiPlayer, random);
+    room.aiPlayer.forceDrop = false;
+    room.aiPlayer.offset = 0;
+    room.aiTickCount = (room.aiTickCount || 0) + 1;
+    room.states.set(room.botId, { ...botState, ...stateFromPlayer(room.aiPlayer, room.seq), skills: [...(botState.skills || [])] });
+
+    const commands = [];
+    const currentBot = () => room.states.get(room.botId);
+    const tryCommand = payload => {
+      try { commands.push(this.recordCommand(room.code, room.botId, payload)); } catch { /* An unavailable random card waits for a later tick. */ }
+    };
+    if (room.aiPlayer.alive !== false && room.aiTickCount % 3 === 1) {
+      const state = currentBot();
+      const danger = state.board?.slice(0, 7).some(row => row.some(Boolean));
+      if (danger && (state.jammed || state.reversed || Number.isInteger(state.blockedColumn) || state.gravity) && state.energy >= 30) {
+        tryCommand({ type: 'skill', skill: 'cleanse' });
+      }
+      const affordable = (currentBot().skills || []).find(card => skillCost(card) <= currentBot().energy);
+      if (affordable) tryCommand({ type: 'skill', skill: baseSkill(affordable), card: affordable });
+      else if ((currentBot().skills || []).length < 3 && currentBot().energy >= 10) tryCommand({ type: 'drawSkill' });
+    }
+
+    if (room.aiPlayer.alive === false) {
+      room.status = 'finished';
+      room.winnerId = humanId;
+      room.ready.clear();
+    }
+    return { placement, commands };
   }
 
   removePlayer(code, playerId) {
@@ -156,6 +225,10 @@ class RoomManager {
     room.clients.delete(playerId);
     room.states.delete(playerId);
     room.ready.delete(playerId);
+    if (room.isAi && playerId !== room.botId) {
+      this.rooms.delete(room.code);
+      return null;
+    }
     if (!room.players.length) {
       this.rooms.delete(room.code);
       return null;
@@ -438,13 +511,13 @@ class RoomManager {
   snapshot(code, viewerId = '') {
     const room = this.getRoom(code);
     return {
-      code: room.code,
+      code: room.publicCode || room.code,
       status: room.status,
       countdown: room.countdown,
       winnerId: room.winnerId || null,
       players: room.players.map(playerId => {
         const raw = room.states.get(playerId) || null;
-        if (!raw) return { playerId, ready: room.ready.has(playerId), connected: room.clients.has(playerId), state: null };
+        if (!raw) return { playerId, ready: room.ready.has(playerId), connected: playerId === room.botId || room.clients.has(playerId), state: null };
         const state = cloneValue(raw);
         state.copyRemainingMs = Math.max(0, (raw.copyBoard?.expiresAt || 0) - Date.now());
         state.predictRemainingMs = Math.max(0, (raw.predictUntil || 0) - Date.now());
@@ -458,7 +531,7 @@ class RoomManager {
           state.copyRemainingMs = 0;
           state.held = null;
         }
-        return { playerId, ready: room.ready.has(playerId), connected: room.clients.has(playerId), state };
+        return { playerId, ready: room.ready.has(playerId), connected: playerId === room.botId || room.clients.has(playerId), state };
       }),
       seq: room.seq
     };
@@ -500,15 +573,60 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
     let playerId = `guest-${Math.random().toString(36).slice(2, 8)}`;
     let room;
     const send = message => socket.send(JSON.stringify(message));
+    const broadcast = (targetRoom, eventType, actorId, payload, command) => {
+      targetRoom.clients.forEach((client, clientId) => {
+        if (client.readyState !== 1) return;
+        let effect = command?.effect;
+        if (effect) {
+          const privateHand = effect.hands?.[clientId] || (clientId === actorId ? effect.hand : undefined);
+          const privateEnergy = effect.energies?.[clientId] ?? (clientId === actorId ? effect.energy : undefined);
+          const { hand, hands, energy, energies, ...publicEffect } = effect;
+          effect = payload?.type === 'drawSkill' && clientId !== actorId
+            ? { cost: publicEffect.cost, drewSkill: true }
+            : { ...publicEffect, hand: privateHand, energy: privateEnergy };
+        }
+        client.send(JSON.stringify({ type: eventType, playerId: actorId, countdown: eventType === 'countdown' ? 3 : undefined, payload, room: manager.snapshot(targetRoom.code, clientId), effect, selfId: clientId }));
+      });
+    };
+    const stopAi = targetRoom => {
+      if (targetRoom?.aiTimer) { clearInterval(targetRoom.aiTimer); targetRoom.aiTimer = null; }
+    };
+    const startAi = targetRoom => {
+      if (!targetRoom?.isAi || targetRoom.aiTimer) return;
+      targetRoom.aiTimer = setInterval(() => {
+        if (!manager.rooms.has(targetRoom.code) || targetRoom.status !== 'playing') { stopAi(targetRoom); return; }
+        const result = manager.tickAiRoom(targetRoom.code);
+        result.commands.forEach(command => broadcast(targetRoom, 'command', command.playerId, command.payload, command));
+        broadcast(targetRoom, 'snapshot', targetRoom.botId);
+        if (targetRoom.status === 'finished') { stopAi(targetRoom); broadcast(targetRoom, 'room', targetRoom.botId); }
+      }, 1100);
+      targetRoom.aiTimer.unref?.();
+    };
+    const scheduleStart = targetRoom => {
+      if (targetRoom.startTimer) clearTimeout(targetRoom.startTimer);
+      targetRoom.startTimer = setTimeout(() => {
+        targetRoom.startTimer = null;
+        if (!manager.rooms.has(targetRoom.code) || targetRoom.status !== 'countdown') return;
+        targetRoom.status = 'playing';
+        targetRoom.countdown = 0;
+        targetRoom.clients.forEach((client, clientId) => { if (client.readyState === 1) client.send(JSON.stringify({ type: 'room', room: manager.snapshot(targetRoom.code, clientId), selfId: clientId })); });
+        startAi(targetRoom);
+      }, 3000);
+      targetRoom.startTimer.unref?.();
+    };
     socket.on('message', raw => {
       let message;
       let command;
       try { message = JSON.parse(raw.toString()); } catch { send({ type: 'error', code: 'BAD_JSON' }); return; }
       try {
         if (message.type === 'create') room = manager.createRoom(playerId);
-        else if (message.type === 'join') room = manager.joinRoom(message.code, playerId);
+        else if (message.type === 'join') room = String(message.code || '').trim().toUpperCase() === 'KTOTO'
+          ? manager.createAiRoom(playerId)
+          : manager.joinRoom(message.code, playerId);
         else if (message.type === 'leave') {
           if (!room) throw new Error('NOT_IN_ROOM');
+          stopAi(room);
+          if (room.startTimer) { clearTimeout(room.startTimer); room.startTimer = null; }
           const updatedRoom = manager.removePlayer(room.code, playerId);
           if (updatedRoom) {
             updatedRoom.clients.forEach((client, clientId) => {
@@ -527,36 +645,16 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         else throw new Error('UNKNOWN_MESSAGE');
         if (room) {
           room.clients.set(playerId, socket);
-          const event = { type: message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : message.type === 'start' ? 'countdown' : 'room', playerId, countdown: message.type === 'start' ? 3 : undefined, payload: message.payload };
-          room.clients.forEach((client, clientId) => {
-            if (client.readyState !== 1) return;
-            let effect = command?.effect;
-            if (effect) {
-              const privateHand = effect.hands?.[clientId] || (clientId === playerId ? effect.hand : undefined);
-              const privateEnergy = effect.energies?.[clientId] ?? (clientId === playerId ? effect.energy : undefined);
-              const { hand, hands, energy, energies, ...publicEffect } = effect;
-              effect = message.payload?.type === 'drawSkill' && clientId !== playerId
-                ? { cost: publicEffect.cost, drewSkill: true }
-                : { ...publicEffect, hand: privateHand, energy: privateEnergy };
-            }
-            client.send(JSON.stringify({ ...event, room: manager.snapshot(room.code, clientId), effect, selfId: clientId }));
-          });
-          if (message.type === 'start') {
-            const countdownRoom = room;
-            setTimeout(() => {
-              if (!manager.rooms.has(countdownRoom.code) || countdownRoom.status !== 'countdown') return;
-              countdownRoom.status = 'playing';
-              countdownRoom.countdown = 0;
-              countdownRoom.clients.forEach((client, clientId) => {
-                if (client.readyState === 1) client.send(JSON.stringify({ type: 'room', room: manager.snapshot(countdownRoom.code, clientId), selfId: clientId }));
-              });
-            }, 3000);
-          }
+          const eventType = message.type === 'command' ? 'command' : message.type === 'state' ? 'snapshot' : room.status === 'countdown' ? 'countdown' : 'room';
+          broadcast(room, eventType, playerId, message.payload, command);
+          if (room.status === 'countdown') scheduleStart(room);
         }
       } catch (error) { send({ type: 'error', code: error.message }); }
     });
     socket.on('close', () => {
       if (!room) return;
+      stopAi(room);
+      if (room.startTimer) clearTimeout(room.startTimer);
       room = manager.removePlayer(room.code, playerId);
       if (!room) return;
       room.clients.forEach((client, clientId) => {

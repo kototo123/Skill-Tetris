@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "test": "node --test game.test.js client-network.test.js server.test.js",
+    "test": "node --test game.test.js ai-player.test.js client-network.test.js server.test.js",
     "start": "node server.js"
   },
   "dependencies": {

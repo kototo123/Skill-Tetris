@@ -97,6 +97,7 @@ function showRoomToast(message) {
 
 function updateRoomPresence(room) {
   if (!room) return;
+  const isAiRoom = room.code === 'KTOTO';
   const players = room.players || [];
   const self = players.find(player => player.playerId === selfId);
   const opponent = players.find(player => player.playerId !== selfId);
@@ -108,7 +109,7 @@ function updateRoomPresence(room) {
       : readyCount < 2
         ? '等待准备'
         : '等待开始';
-  const detail = `${players.length}/2 人 · 准备 ${readyCount}/2${self?.ready ? ' · 我已准备' : ''}${opponent?.ready ? ' · 对手已准备' : ''}`;
+  const detail = `${players.length}/2 人 · ${isAiRoom ? 'KTOTO AI · ' : ''}准备 ${readyCount}/2${self?.ready ? ' · 我已准备' : ''}${opponent?.ready ? ` · ${isAiRoom ? 'AI' : '对手'}已准备` : ''}`;
   presenceEl.innerHTML = `<span class="room-phase">${phase}</span><span class="room-players">${detail}</span>`;
   const lobbyTitle = document.querySelector('#lobby-title');
   const lobbyMessage = document.querySelector('#lobby-message');

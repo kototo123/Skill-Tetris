@@ -11,6 +11,84 @@ test('creates a room with a short invite code', () => {
   assert.equal(room.players.length, 1);
 });
 
+test('creates an independent private AI room for every KTOTO player', () => {
+  const manager = new RoomManager();
+  const first = manager.createAiRoom('p1');
+  const second = manager.createAiRoom('p2');
+
+  assert.notEqual(first.code, second.code);
+  assert.equal(first.publicCode, 'KTOTO');
+  assert.equal(first.isAi, true);
+  assert.deepEqual(first.players, ['p1', first.botId]);
+  assert.equal(first.ready.has(first.botId), true);
+  assert.equal(first.states.get(first.botId).energy, 50);
+  assert.equal(manager.snapshot(first.code, 'p1').code, 'KTOTO');
+  assert.equal(manager.snapshot(first.code, 'p1').players[1].connected, true);
+});
+
+test('readying the human in an AI room starts its countdown without affecting PvP', () => {
+  const manager = new RoomManager();
+  const aiRoom = manager.createAiRoom('human');
+  manager.setReady(aiRoom.code, 'human');
+  assert.equal(aiRoom.status, 'countdown');
+  assert.equal(aiRoom.countdown, 3);
+
+  const pvp = manager.createRoom('host');
+  manager.joinRoom(pvp.code, 'guest');
+  manager.setReady(pvp.code, 'host');
+  manager.setReady(pvp.code, 'guest');
+  assert.equal(pvp.status, 'ready');
+});
+
+test('an AI tick places a piece and casts owned skills through normal command rules', () => {
+  const manager = new RoomManager();
+  const room = manager.createAiRoom('human');
+  room.status = 'playing';
+  const bot = room.states.get(room.botId);
+  bot.skills = ['jam'];
+  bot.energy = 50;
+
+  const result = manager.tickAiRoom(room.code, () => 0);
+
+  assert.equal(result.placement !== null, true);
+  assert.equal(room.states.get(room.botId).board.flat().some(Boolean), true);
+  assert.equal(result.commands.some(command => command.effect?.jammed), true);
+  assert.equal(room.states.get(room.botId).energy, 40);
+  assert.equal(room.states.get('human').jammed, true);
+});
+
+test('AI ticks finish the match when either side has topped out', () => {
+  const manager = new RoomManager();
+  const lostBotRoom = manager.createAiRoom('human-a');
+  lostBotRoom.status = 'playing';
+  Object.assign(lostBotRoom.states.get(lostBotRoom.botId), {
+    board: Array.from({ length: 20 }, () => Array(10).fill('x')),
+    current: { cells: [[1]], x: 4, y: -1, color: 'pink' }
+  });
+  manager.tickAiRoom(lostBotRoom.code, () => 0);
+  assert.equal(lostBotRoom.status, 'finished');
+  assert.equal(lostBotRoom.winnerId, 'human-a');
+
+  const lostHumanRoom = manager.createAiRoom('human-b');
+  lostHumanRoom.status = 'playing';
+  lostHumanRoom.states.get('human-b').alive = false;
+  manager.tickAiRoom(lostHumanRoom.code, () => 0);
+  assert.equal(lostHumanRoom.status, 'finished');
+  assert.equal(lostHumanRoom.winnerId, lostHumanRoom.botId);
+});
+
+test('starting an AI rematch rebuilds the bot instead of keeping its old board', () => {
+  const manager = new RoomManager();
+  const room = manager.createAiRoom('human');
+  room.aiPlayer.board[19][0] = 'pink';
+  room.status = 'finished';
+  manager.setReady(room.code, 'human');
+
+  assert.equal(room.status, 'countdown');
+  assert.equal(room.aiPlayer.board.flat().some(Boolean), false);
+  assert.equal(room.states.get(room.botId).board.flat().some(Boolean), false);
+});
+
 test('joins a room by code and reaches ready when both players ready', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('p1');
@@ -489,6 +567,37 @@ test('broadcasts countdown to both connected players', async () => {
   assert.equal((await hostCountdown).countdown, 3);
   assert.equal((await guestCountdown).countdown, 3);
   host.terminate(); guest.terminate();
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
+});
+
+test('joining KTOTO over websocket auto-counts down and streams server AI state', async () => {
+  const { httpServer, wss, manager } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const human = await openSocket(port);
+  const joined = nextMessage(human, message => message.type === 'room' && message.room?.code === 'KTOTO');
+  human.send(JSON.stringify({ type: 'join', code: 'KTOTO' }));
+  const joinedEvent = await joined;
+  const internalRoom = [...manager.rooms.values()].find(value => value.hostId === joinedEvent.selfId);
+  assert.equal(internalRoom.isAi, true);
+
+  const countdown = nextMessage(human, message => message.type === 'countdown');
+  human.send(JSON.stringify({ type: 'ready' }));
+  assert.equal((await countdown).countdown, 3);
+
+  const playing = nextMessage(human, message => message.type === 'room' && message.room.status === 'playing');
+  await playing;
+  const aiSnapshot = await nextMessage(human, message => message.type === 'snapshot'
+    && message.room.players.find(player => player.playerId === internalRoom.botId)?.state?.board?.flat().some(Boolean));
+  assert.equal(aiSnapshot.room.players.find(player => player.playerId === internalRoom.botId).connected, true);
+
+  const left = nextMessage(human, message => message.type === 'left');
+  human.send(JSON.stringify({ type: 'leave' }));
+  await left;
+  assert.equal(manager.rooms.size, 0);
+  assert.equal(internalRoom.aiTimer, null);
+  human.terminate();
   await new Promise(resolve => wss.close(resolve));
   await new Promise(resolve => httpServer.close(resolve));
 });
