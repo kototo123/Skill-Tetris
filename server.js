@@ -11,7 +11,7 @@ function randomCards(count = 3) {
 }
 
 function initialState(stateSeq = 0) {
-  return { score: 0, energy: 20, stateSeq, alive: true, board: null, current: null, skills: randomCards(3), held: null, predictUntil: 0, reflect: false, copyBoard: null };
+  return { score: 0, energy: 20, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null };
 }
 
 function cloneValue(value) {
@@ -271,7 +271,7 @@ class RoomManager {
       reflect: previous.reflect === true,
       jammed: acceptsState ? state?.jammed === true : previous.jammed === true,
       reversed: acceptsState ? state?.reversed === true : previous.reversed === true,
-      skills: Array.isArray(previous.skills) ? previous.skills : randomCards(3),
+      skills: Array.isArray(previous.skills) ? previous.skills : [],
       held: previous.held || null,
       predictUntil: previous.predictUntil || 0,
       copyBoard: previous.copyBoard || null,

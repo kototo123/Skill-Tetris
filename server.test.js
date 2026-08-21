@@ -19,12 +19,12 @@ test('joins a room by code and reaches ready when both players ready', () => {
   assert.equal(manager.setReady(room.code, 'p2').status, 'ready');
 });
 
-test('gives each player random skill cards while keeping cleanse fixed', () => {
+test('starts each player with an empty random hand while keeping cleanse fixed', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('p1');
   const state = room.states.get('p1');
   assert.equal(Array.isArray(state.skills), true);
-  assert.equal(state.skills.length, 3);
+  assert.equal(state.skills.length, 0);
   assert.equal(state.skills.includes('cleanse'), false);
 });
 
