@@ -662,6 +662,29 @@ test('disconnecting during a match frees the seat and awards the remaining playe
   await new Promise(resolve => httpServer.close(resolve));
 });
 
+test('explicit leave immediately refreshes the remaining players room count', async () => {
+  const { httpServer, wss } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const host = await openSocket(port);
+  const guest = await openSocket(port);
+  const created = nextMessage(host, message => message.type === 'room');
+  host.send(JSON.stringify({ type: 'create' }));
+  const code = (await created).room.code;
+  const joined = nextMessage(guest, message => message.type === 'room');
+  guest.send(JSON.stringify({ type: 'join', code }));
+  const guestRoom = await joined;
+  const refreshed = nextMessage(host, message => message.disconnectedId === guestRoom.selfId);
+  guest.send(JSON.stringify({ type: 'leave' }));
+  const notice = await refreshed;
+  assert.equal(notice.room.players.length, 1);
+  assert.equal(notice.room.players[0].connected, true);
+  guest.terminate();
+  host.terminate();
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
+});
+
 test('transfers room ownership when the host disconnects before a match', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');

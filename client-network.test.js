@@ -36,3 +36,14 @@ test('reports client event failures separately from malformed server messages', 
   socket.onmessage({ data: '{broken' });
   assert.equal(events.at(-1).code, 'BAD_SERVER_MESSAGE');
 });
+
+test('sends an explicit leave message when leaving an active room', () => {
+  const client = new global.MatchClient();
+  client.connect('ws://example.test');
+  const socket = FakeWebSocket.instances.at(-1);
+  socket.open();
+  client.roomCode = 'ABCDE';
+  client.leave();
+  assert.deepEqual(socket.sent, [{ type: 'leave' }]);
+  assert.equal(client.roomCode, '');
+});

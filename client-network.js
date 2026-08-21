@@ -39,6 +39,11 @@
     start() { if (this.roomCode) this.send('start'); }
     command(payload) { if (this.roomCode) this.send('command', { payload }); }
     state(state) { if (this.roomCode) this.send('state', { state }); }
+    leave() {
+      if (!this.roomCode) return;
+      this.send('leave');
+      this.roomCode = '';
+    }
   }
   root.MatchClient = MatchClient;
 })(typeof window !== 'undefined' ? window : globalThis);

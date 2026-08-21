@@ -485,7 +485,18 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
   });
   if (!WebSocketServer) return { httpServer, manager };
   const wss = new WebSocketServer({ server: httpServer });
+  const heartbeat = setInterval(() => {
+    wss.clients.forEach(client => {
+      if (client.isAlive === false) { client.terminate(); return; }
+      client.isAlive = false;
+      client.ping();
+    });
+  }, 10000);
+  heartbeat.unref?.();
+  wss.on('close', () => clearInterval(heartbeat));
   wss.on('connection', socket => {
+    socket.isAlive = true;
+    socket.on('pong', () => { socket.isAlive = true; });
     let playerId = `guest-${Math.random().toString(36).slice(2, 8)}`;
     let room;
     const send = message => socket.send(JSON.stringify(message));
@@ -496,6 +507,18 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
       try {
         if (message.type === 'create') room = manager.createRoom(playerId);
         else if (message.type === 'join') room = manager.joinRoom(message.code, playerId);
+        else if (message.type === 'leave') {
+          if (!room) throw new Error('NOT_IN_ROOM');
+          const updatedRoom = manager.removePlayer(room.code, playerId);
+          if (updatedRoom) {
+            updatedRoom.clients.forEach((client, clientId) => {
+              if (client.readyState === 1) client.send(JSON.stringify({ type: 'room', room: manager.snapshot(updatedRoom.code, clientId), disconnectedId: playerId, selfId: clientId }));
+            });
+          }
+          room = null;
+          send({ type: 'left' });
+          return;
+        }
         else if (!room) throw new Error('NOT_IN_ROOM');
         else if (message.type === 'ready') room = manager.setReady(room.code, playerId);
         else if (message.type === 'start') room = manager.startRoom(room.code, playerId);

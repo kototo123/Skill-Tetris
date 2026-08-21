@@ -523,6 +523,15 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('focus', resumeAfterHidden);
 
+let pageLeaving = false;
+function leaveRoomOnPageExit() {
+  if (pageLeaving) return;
+  pageLeaving = true;
+  network.leave();
+}
+window.addEventListener('pagehide', leaveRoomOnPageExit);
+window.addEventListener('beforeunload', leaveRoomOnPageExit);
+
 function paint(key) {
   const player = players[key];
   const cells = player.board.map(row => row.slice());
