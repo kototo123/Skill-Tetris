@@ -48,13 +48,29 @@ function updateRoomPresence(room) {
   const self = players.find(player => player.playerId === selfId);
   const opponent = players.find(player => player.playerId !== selfId);
   const readyCount = players.filter(player => player.ready).length;
-  const phase = room.status === 'waiting' ? '等待对手加入' : room.status === 'ready' ? '双方已准备，可开始' : room.status === 'countdown' ? '倒计时中' : room.status === 'playing' ? '对战进行中' : room.status === 'finished' ? '对战结束' : room.status;
+  const phase = players.length < 2
+    ? '等待对手'
+    : room.status === 'playing' || room.status === 'countdown'
+      ? (room.status === 'countdown' ? '倒计时中' : '对战进行中')
+      : readyCount < 2
+        ? '等待准备'
+        : '等待开始';
   const detail = `${players.length}/2 人 · 准备 ${readyCount}/2${self?.ready ? ' · 我已准备' : ''}${opponent?.ready ? ' · 对手已准备' : ''}`;
   presenceEl.innerHTML = `<span class="room-phase">${phase}</span><span class="room-players">${detail}</span>`;
+  const lobbyTitle = document.querySelector('#lobby-title');
+  const lobbyMessage = document.querySelector('#lobby-message');
+  if (lobbyTitle) lobbyTitle.textContent = phase;
+  if (lobbyMessage) lobbyMessage.textContent = phase === '等待对手'
+    ? '等待另一位玩家加入房间。'
+    : phase === '等待准备'
+      ? '双方都点击准备后，房主才能开始。'
+      : phase === '等待开始'
+        ? '双方已准备，请房主点击开始游戏。'
+        : '比赛进行中。';
 }
 
 function setRoomView(status = 'waiting') {
-  const inGame = online && (status === 'playing' || status === 'finished');
+  const inGame = online && status === 'playing';
   appEl.classList.toggle('game-hidden', !inGame);
   lobbyEl.hidden = inGame;
   if (!online) {
@@ -200,6 +216,8 @@ function finishMatch(message) {
   resultTimer = setTimeout(() => {
     result.hidden = true;
     result.classList.remove('show');
+    matchStarted = false;
+    setRoomView('finished');
   }, 2250);
 }
 
