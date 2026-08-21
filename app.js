@@ -122,6 +122,9 @@ function animateSkill(skill, actorId) {
 function applyRemoteState(state) {
   if (!state) return;
   const remote = players.b;
+  const updatedAt = Number(state.updatedAt) || 0;
+  if (updatedAt && updatedAt === remote.lastServerStateAt) return;
+  remote.lastServerStateAt = updatedAt;
   remote.board = Array.isArray(state.board) ? state.board : createBoard();
   remote.score = state.score || 0;
   remote.energy = state.energy || 0;

@@ -159,6 +159,17 @@ test('identifies each client and broadcasts the opponent active-piece snapshot',
   await new Promise(resolve => httpServer.close(resolve));
 });
 
+test('stamps player snapshots with the time that player last updated state', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  const before = Date.now();
+  manager.updateState(room.code, 'guest', { score: 4, alive: true });
+  const updatedAt = room.states.get('guest').updatedAt;
+  assert.equal(Number.isFinite(updatedAt), true);
+  assert.equal(updatedAt >= before, true);
+});
+
 test('only the host can start a ready room and emits a three second countdown', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');

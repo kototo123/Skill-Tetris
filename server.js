@@ -85,6 +85,7 @@ class RoomManager {
           blocked = true;
         } else if (payload.skill === 'jam') opponent.jammed = true;
         else opponent.reversed = true;
+        opponent.updatedAt = Date.now();
         room.states.set(opponentId, opponent);
       }
       command.effect = {
@@ -97,6 +98,7 @@ class RoomManager {
         reversed: payload.skill === 'reverse' && !blocked,
         cleanse: payload.skill === 'cleanse' ? 2 : 0
       };
+      attacker.updatedAt = Date.now();
       room.states.set(playerId, attacker);
     }
     room.seq = command.seq;
@@ -119,6 +121,7 @@ class RoomManager {
       shield: previous.shield === true,
       jammed: state?.jammed === true,
       reversed: state?.reversed === true,
+      updatedAt: Date.now(),
       board: nextBoard,
       current: state?.current && Array.isArray(state.current.cells) ? {
         cells: state.current.cells,
