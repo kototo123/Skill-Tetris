@@ -125,9 +125,22 @@ class RoomManager {
     const room = this.getRoom(code);
     if (!room.players.includes(playerId)) throw new Error('PLAYER_NOT_IN_ROOM');
     if (room.status !== 'playing') throw new Error('MATCH_NOT_PLAYING');
-    if (!payload || !['move', 'rotate', 'softDrop', 'hardDrop', 'skill', 'drawSkill'].includes(payload.type)) throw new Error('INVALID_COMMAND');
+    if (!payload || !['move', 'rotate', 'softDrop', 'hardDrop', 'skill', 'drawSkill', 'reportOpponentLoss'].includes(payload.type)) throw new Error('INVALID_COMMAND');
     if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
     const command = { seq: room.seq + 1, playerId, payload, at: Date.now() };
+    if (payload.type === 'reportOpponentLoss') {
+      const opponentId = room.players.find(id => id !== playerId);
+      const opponent = opponentId ? room.states.get(opponentId) : null;
+      if (!opponentId || !opponent || opponent.alive === false) throw new Error('OPPONENT_NOT_ACTIVE');
+      if (Date.now() - (opponent.updatedAt || 0) < 500) throw new Error('OPPONENT_STATE_FRESH');
+      opponent.alive = false;
+      opponent.updatedAt = Date.now();
+      room.states.set(opponentId, opponent);
+      room.status = 'finished';
+      room.winnerId = playerId;
+      room.ready.clear();
+      command.effect = { opponentLost: true, targetId: opponentId };
+    }
     if (payload.type === 'drawSkill') {
       const drawCost = 10;
       const player = room.states.get(playerId) || initialState();

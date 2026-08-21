@@ -16,6 +16,7 @@ let selfId = '';
 let hostId = '';
 let matchStarted = false;
 let matchEnded = false;
+let opponentLossReported = false;
 let countdownRunning = false;
 let lastStateSent = 0;
 let skillSyncPauseUntil = 0;
@@ -261,6 +262,7 @@ function resetMatch() {
   players.a.skills = [];
   players.b.skills = [];
   matchEnded = false;
+  opponentLossReported = false;
   matchStarted = false;
   const result = document.querySelector('#result');
   if (result) {
@@ -680,6 +682,10 @@ function loop(now) {
   });
   if (online && matchStarted && players.b.alive && Date.now() - (players.b.lastSnapshotAt || 0) > 350) {
     if (advancePlayer(players.b, delta, 2) > 0) paint('b');
+  }
+  if (online && matchStarted && !matchEnded && !players.b.alive && !opponentLossReported) {
+    opponentLossReported = true;
+    network.command({ type: 'reportOpponentLoss' });
   }
   if (online && matchStarted && !matchEnded && !players.a.alive) finishMatch('你输了');
   if (online && matchStarted && now >= skillSyncPauseUntil && now - lastStateSent >= 100) {

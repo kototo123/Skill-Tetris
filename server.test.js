@@ -540,6 +540,21 @@ test('finishes the room with one authoritative winner when a player dies', () =>
   assert.equal(snapshot.winnerId, 'host');
 });
 
+test('finishes the room when the active player reports a stale opponent has topped out', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  room.states.get('guest').updatedAt = Date.now() - 1000;
+
+  const command = manager.recordCommand(room.code, 'host', { type: 'reportOpponentLoss' });
+
+  assert.equal(command.effect.opponentLost, true);
+  assert.equal(room.states.get('guest').alive, false);
+  assert.equal(room.status, 'finished');
+  assert.equal(room.winnerId, 'host');
+});
+
 test('blocks commands outside active play and reports jam target', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
