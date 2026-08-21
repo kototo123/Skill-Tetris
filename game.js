@@ -74,7 +74,7 @@
       this.next = this.nextQueue[0];
       this.x = 3;
       this.y = -1;
-      this.energy = 20;
+      this.energy = 50;
       this.score = 0;
       this.combo = 0;
       this.alive = true;

@@ -3,7 +3,7 @@ const skillCatalog = {
   jam: ['锁定', '禁止旋转 · 10'], reverse: ['反向操控', '左右旋转反向 · 10'], swapShape: ['形态交换', '交换双方当前形状 · 25'], slam: ['坠落', '强制对方硬降 · 35'],
   reshape: ['重构', '整理底部四行 · 25'], store: ['储存', '暂存当前方块 · 15'], predict: ['预测', '显示后续方块 · 15'], reflect: ['反弹', '反弹下一次攻击 · 25'], clearTop: ['天降清除', '消除最上面一行 · 40'], copyBoard: ['复制底板', '记录当前棋盘 · 35']
 };
-const skillCosts = { cleanse: 20, jam: 10, reverse: 10, swapShape: 25, slam: 35, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35 };
+const skillCosts = { cleanse: 30, jam: 10, reverse: 10, swapShape: 25, slam: 35, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35 };
 
 const players = { a: new Player('我', 'cyan'), b: new Player('对手', 'pink') };
 players.a.dropInterval = 760;
@@ -163,7 +163,10 @@ function applyRemoteState(state) {
   const remote = players.b;
   const updatedAt = Number(state.updatedAt) || 0;
   if (updatedAt && updatedAt === remote.lastServerStateAt) return;
+  const remoteSignature = JSON.stringify({ board: state.board || null, current: state.current || null, alive: state.alive !== false });
+  const pieceChanged = remoteSignature !== remote.lastRemoteSignature;
   remote.lastServerStateAt = updatedAt;
+  remote.lastRemoteSignature = remoteSignature;
   remote.board = Array.isArray(state.board) ? state.board : createBoard();
   remote.score = state.score || 0;
   remote.energy = state.energy || 0;
@@ -172,8 +175,8 @@ function applyRemoteState(state) {
   remote.reversed = state.reversed === true;
   remote.reflect = state.reflect === true;
   remote.skills = Array.isArray(state.skills) ? state.skills.slice() : remote.skills;
-  remote.lastSnapshotAt = Date.now();
-  if (state.current) {
+  if (pieceChanged) remote.lastSnapshotAt = Date.now();
+  if (state.current && pieceChanged) {
     remote.current = { name: 'remote', cells: state.current.cells, color: state.current.color };
     remote.x = state.current.x;
     remote.y = state.current.y;

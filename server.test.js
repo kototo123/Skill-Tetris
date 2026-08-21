@@ -23,6 +23,7 @@ test('starts each player with an empty random hand while keeping cleanse fixed',
   const manager = new RoomManager();
   const room = manager.createRoom('p1');
   const state = room.states.get('p1');
+  assert.equal(state.energy, 50);
   assert.equal(Array.isArray(state.skills), true);
   assert.equal(state.skills.length, 0);
   assert.equal(state.skills.includes('cleanse'), false);
@@ -49,7 +50,7 @@ test('fixed cleanse can be used without owning a card and cards are consumed', (
   state.energy = 40;
   state.skills = ['reshape'];
   const command = manager.recordCommand(room.code, 'p1', { type: 'skill', skill: 'cleanse' });
-  assert.equal(command.effect.cost, 20);
+  assert.equal(command.effect.cost, 30);
   assert.deepEqual(room.states.get('p1').skills, ['reshape']);
   room.states.get('p1').energy = 25;
   manager.recordCommand(room.code, 'p1', { type: 'skill', skill: 'reshape' });
@@ -487,7 +488,7 @@ test('starting a room resets player state and jam locks the opponent piece', () 
   manager.startRoom(room.code, 'host');
   room.status = 'playing';
   assert.equal(room.states.get('host').score, 0);
-  assert.equal(room.states.get('host').energy, 20);
+  assert.equal(room.states.get('host').energy, 50);
   assert.equal(room.states.get('host').alive, true);
   manager.updateState(room.code, 'host', { ackSeq: room.seq, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
   room.states.get('host').energy = 10;
@@ -510,7 +511,7 @@ test('a stale snapshot from the previous round cannot overwrite the reset state'
 
   manager.updateState(room.code, 'host', { energy: 88, score: 900, ackSeq: 9 });
 
-  assert.equal(room.states.get('host').energy, 20);
+  assert.equal(room.states.get('host').energy, 50);
   assert.equal(room.states.get('host').score, 0);
   assert.equal(room.seq > 9, true);
 });
@@ -628,12 +629,12 @@ test('accepts reverse as a low-cost attack and marks the opponent', () => {
   assert.equal(room.states.get('guest').reversed, true);
 });
 
-test('targets cleanse at the caster and returns authoritative energy', () => {
+test('targets cleanse at the caster and charges thirty energy', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 20 });
+  room.states.get('host').energy = 30;
   const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
   assert.equal(command.effect.targetId, 'host');
   assert.equal(command.effect.energy, 0);
@@ -644,7 +645,7 @@ test('cleanse removes active attack debuffs', () => {
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 20, jammed: true, reversed: true });
+  manager.updateState(room.code, 'host', { energy: 30, jammed: true, reversed: true });
   const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
   assert.equal(command.effect.targetId, 'host');
   assert.equal(room.states.get('host').jammed, false);

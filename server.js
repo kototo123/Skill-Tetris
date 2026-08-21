@@ -11,7 +11,7 @@ function randomCards(count = 3) {
 }
 
 function initialState(stateSeq = 0) {
-  return { score: 0, energy: 20, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null };
+  return { score: 0, energy: 50, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null };
 }
 
 function cloneValue(value) {
@@ -143,7 +143,7 @@ class RoomManager {
     }
     if (payload.type === 'skill') {
       const fixedSkill = payload.skill === 'cleanse';
-      const skillCost = fixedSkill ? 20 : SKILL_COSTS[payload.skill];
+      const skillCost = fixedSkill ? 30 : SKILL_COSTS[payload.skill];
       const attacker = room.states.get(playerId) || {};
       if (payload.skill === 'copyBoard' && attacker.copyBoard?.expiresAt > Date.now()) {
         attacker.board = cloneValue(attacker.copyBoard.board);
