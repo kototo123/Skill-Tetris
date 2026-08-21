@@ -110,6 +110,11 @@ class RoomManager {
     if (!room) throw new Error('ROOM_NOT_FOUND');
     if (room.players.includes(playerId)) return room;
     if (room.players.length >= 2) throw new Error('ROOM_FULL');
+    if (room.status === 'finished') {
+      room.status = 'waiting';
+      room.winnerId = null;
+      room.ready.clear();
+    }
     room.players.push(playerId);
     room.states.set(playerId, initialState());
     return room;
@@ -139,6 +144,27 @@ class RoomManager {
     room.seq += 1;
     room.players.forEach(id => room.states.set(id, initialState(room.seq)));
     room.commands = [];
+    return room;
+  }
+
+  removePlayer(code, playerId) {
+    const room = this.getRoom(code);
+    const index = room.players.indexOf(playerId);
+    if (index < 0) return room;
+    const wasPlaying = room.status === 'playing';
+    room.players.splice(index, 1);
+    room.clients.delete(playerId);
+    room.states.delete(playerId);
+    room.ready.delete(playerId);
+    if (!room.players.length) {
+      this.rooms.delete(room.code);
+      return null;
+    }
+    if (room.hostId === playerId) room.hostId = room.players[0];
+    room.ready.clear();
+    room.countdown = 0;
+    room.status = wasPlaying ? 'finished' : 'waiting';
+    room.winnerId = wasPlaying ? room.players[0] : null;
     return room;
   }
 
@@ -204,7 +230,6 @@ class RoomManager {
       if (payload.skill === 'unlockHardDrop' && attacker.hardDropUnlocked) throw new Error('HARD_DROP_ALREADY_UNLOCKED');
       if (!fixedSkill && !SKILL_COSTS[payload.skill]) throw new Error('INVALID_SKILL');
       if (!fixedSkill && !ownedCard) throw new Error('SKILL_NOT_OWNED');
-      if (payload.skill === 'cardSwap' && ((attacker.skills || []).length < 2 || !(opponent?.skills || []).length)) throw new Error('CARD_SWAP_UNAVAILABLE');
       let resolvedSkill = payload.skill;
       if (payload.skill === 'copy') {
         if (!opponent?.lastSkill || COPY_EXCLUDED.has(opponent.lastSkill)) throw new Error('NOTHING_TO_COPY');
@@ -213,12 +238,14 @@ class RoomManager {
       const modifier = String(ownedCard || '').split('@')[1] || '';
       const weak = modifier === 'weak';
       const gold = modifier === 'gold';
+      const remainingSkills = fixedSkill ? (attacker.skills || []) : consumeOne(attacker.skills, ownedCard);
+      if (resolvedSkill === 'cardSwap' && (!remainingSkills.length || !(opponent?.skills || []).length)) throw new Error('CARD_SWAP_UNAVAILABLE');
       const cost = payload.skill === 'cleanse' ? 30 : payload.skill === 'unlockHardDrop' ? 80 : skillCost(ownedCard);
       if (!cost) throw new Error('INVALID_SKILL');
       if ((attacker.energy || 0) < cost) throw new Error('INSUFFICIENT_ENERGY');
       attacker.energy -= cost;
       attacker.stateSeq = command.seq;
-      if (!fixedSkill) attacker.skills = consumeOne(attacker.skills, ownedCard);
+      if (!fixedSkill) attacker.skills = remainingSkills;
       if (resolvedSkill === 'reflect') attacker.reflect = true;
       if (resolvedSkill === 'cleanse') {
         attacker.jammed = false;
@@ -492,12 +519,13 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
             client.send(JSON.stringify({ ...event, room: manager.snapshot(room.code, clientId), effect, selfId: clientId }));
           });
           if (message.type === 'start') {
+            const countdownRoom = room;
             setTimeout(() => {
-              if (room.status !== 'countdown') return;
-              room.status = 'playing';
-              room.countdown = 0;
-              room.clients.forEach((client, clientId) => {
-                if (client.readyState === 1) client.send(JSON.stringify({ type: 'room', room: manager.snapshot(room.code, clientId), selfId: clientId }));
+              if (!manager.rooms.has(countdownRoom.code) || countdownRoom.status !== 'countdown') return;
+              countdownRoom.status = 'playing';
+              countdownRoom.countdown = 0;
+              countdownRoom.clients.forEach((client, clientId) => {
+                if (client.readyState === 1) client.send(JSON.stringify({ type: 'room', room: manager.snapshot(countdownRoom.code, clientId), selfId: clientId }));
               });
             }, 3000);
           }
@@ -506,7 +534,8 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
     });
     socket.on('close', () => {
       if (!room) return;
-      room.clients.delete(playerId);
+      room = manager.removePlayer(room.code, playerId);
+      if (!room) return;
       room.clients.forEach((client, clientId) => {
         if (client.readyState === 1) client.send(JSON.stringify({ type: 'room', room: manager.snapshot(room.code, clientId), disconnectedId: playerId, selfId: clientId }));
       });

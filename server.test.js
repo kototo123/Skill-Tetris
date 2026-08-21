@@ -570,6 +570,20 @@ test('finishes the room when the active player reports a stale opponent has topp
   assert.equal(room.winnerId, 'host');
 });
 
+test('allows a loss report retry after the opponents state becomes stale', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  room.states.get('guest').updatedAt = Date.now();
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'reportOpponentLoss' }), /OPPONENT_STATE_FRESH/);
+  room.states.get('guest').updatedAt = Date.now() - 700;
+  const retry = manager.recordCommand(room.code, 'host', { type: 'reportOpponentLoss' });
+  assert.equal(retry.effect.opponentLost, true);
+  assert.equal(room.status, 'finished');
+  assert.equal(room.winnerId, 'host');
+});
+
 test('blocks commands outside active play and reports jam target', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
@@ -612,25 +626,50 @@ test('keeps finished room open and allows both players to prepare a rematch', ()
   assert.equal(manager.startRoom(room.code, 'host').status, 'countdown');
 });
 
-test('notifies the remaining player when the opponent disconnects', async () => {
-  const { httpServer, wss } = createServer();
+test('disconnecting during a match frees the seat and awards the remaining player', async () => {
+  const manager = new RoomManager();
+  const { httpServer, wss } = createServer({ manager });
   await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
   const { port } = httpServer.address();
   const host = await openSocket(port);
   const guest = await openSocket(port);
   const created = nextMessage(host, message => message.type === 'room');
   host.send(JSON.stringify({ type: 'create' }));
-  const code = (await created).room.code;
+  const hostRoom = await created;
+  const code = hostRoom.room.code;
   const joined = nextMessage(guest, message => message.type === 'room');
   guest.send(JSON.stringify({ type: 'join', code }));
   const guestRoom = await joined;
+  manager.getRoom(code).status = 'playing';
   const disconnected = nextMessage(host, message => message.disconnectedId === guestRoom.selfId);
   guest.close();
   const notice = await disconnected;
-  assert.equal(notice.room.players.find(player => player.playerId === guestRoom.selfId).connected, false);
+  assert.equal(notice.room.status, 'finished');
+  assert.equal(notice.room.winnerId, hostRoom.selfId);
+  assert.equal(notice.room.players.length, 1);
+  assert.equal(notice.room.players.some(player => player.playerId === guestRoom.selfId), false);
+
+  const replacement = await openSocket(port);
+  const rejoined = nextMessage(replacement, message => message.type === 'room');
+  replacement.send(JSON.stringify({ type: 'join', code }));
+  const replacementRoom = (await rejoined).room;
+  assert.equal(replacementRoom.players.length, 2);
+  assert.equal(replacementRoom.status, 'waiting');
+  assert.equal(replacementRoom.winnerId, null);
+  replacement.terminate();
   host.terminate();
   await new Promise(resolve => wss.close(resolve));
   await new Promise(resolve => httpServer.close(resolve));
+});
+
+test('transfers room ownership when the host disconnects before a match', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  const updated = manager.removePlayer(room.code, 'host');
+  assert.deepEqual(updated.players, ['guest']);
+  assert.equal(updated.hostId, 'guest');
+  assert.equal(updated.status, 'waiting');
 });
 
 test('accepts jam as a real low-cost skill', () => {
@@ -765,6 +804,19 @@ test('card swap exchanges one remaining owned card with one opponent card', () =
   assert.deepEqual(room.states.get('host').skills, ['predict']);
   assert.deepEqual(room.states.get('guest').skills, ['jam']);
   assert.equal(command.effect.cardSwap, true);
+});
+
+test('copying card swap without two exchangeable cards fails without spending the copy card', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 20, skills: ['copy'] });
+  Object.assign(room.states.get('guest'), { skills: [], lastSkill: 'cardSwap' });
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'copy' }), /CARD_SWAP_UNAVAILABLE/);
+  assert.equal(room.states.get('host').energy, 20);
+  assert.deepEqual(room.states.get('host').skills, ['copy']);
+  assert.deepEqual(room.states.get('guest').skills, []);
 });
 
 test('drain transfers ten energy and reroll replaces the current shape', () => {

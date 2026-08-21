@@ -23,6 +23,7 @@ let hostId = '';
 let matchStarted = false;
 let matchEnded = false;
 let opponentLossReported = false;
+let lastOpponentLossReportAt = 0;
 let countdownRunning = false;
 let lastStateSent = 0;
 let skillSyncPauseUntil = 0;
@@ -282,6 +283,7 @@ function resetMatch() {
   players.b.skills = [];
   matchEnded = false;
   opponentLossReported = false;
+  lastOpponentLossReportAt = 0;
   matchStarted = false;
   const result = document.querySelector('#result');
   if (result) {
@@ -469,8 +471,16 @@ const network = new MatchClient({
     if (event.type === 'command' && event.payload?.type === 'skill') {
       animateSkill(event.effect?.executedSkill || event.payload.skill, event.playerId, event.effect);
     }
-    if (event.type === 'error') { log(`技能/网络错误: ${event.code}`); feedback(`房间操作失败：${event.code}`, 'error'); }
-    if (event.disconnectedId && event.disconnectedId !== selfId) { log('对手已离线'); showRoomToast('对手已离开房间'); setRoomView('waiting'); }
+    if (event.type === 'error') {
+      if (event.code === 'OPPONENT_STATE_FRESH') opponentLossReported = false;
+      log(`技能/网络错误: ${event.code}`);
+      feedback(`房间操作失败：${event.code}`, 'error');
+    }
+    if (event.disconnectedId && event.disconnectedId !== selfId) {
+      log('对手已离线');
+      showRoomToast(event.room?.status === 'finished' ? '对手离线，本局获胜' : '对手已离开房间');
+      if (event.room?.status !== 'finished') setRoomView('waiting');
+    }
   }
 });
 
@@ -756,8 +766,10 @@ function loop(now) {
   if (online && matchStarted && players.b.alive && Date.now() - (players.b.lastSnapshotAt || 0) > 350) {
     if (advancePlayer(players.b, delta, 2) > 0) paint('b');
   }
-  if (online && matchStarted && !matchEnded && !players.b.alive && !opponentLossReported) {
+  const remoteStaleFor = Date.now() - (players.b.lastSnapshotAt || 0);
+  if (online && matchStarted && !matchEnded && !players.b.alive && remoteStaleFor >= 650 && (!opponentLossReported || now - lastOpponentLossReportAt >= 1200)) {
     opponentLossReported = true;
+    lastOpponentLossReportAt = now;
     network.command({ type: 'reportOpponentLoss' });
   }
   if (online && matchStarted && !matchEnded && !players.a.alive) finishMatch('你输了');
