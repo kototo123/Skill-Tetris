@@ -1,10 +1,13 @@
 const assert = require('node:assert/strict');
+const { test } = require('node:test');
 const {
   createBoard,
   mergePiece,
   clearLines,
   addGarbageLines,
   canUseSkill,
+  Player,
+  advancePlayer,
 } = require('./game.js');
 
 const board = createBoard(4, 4);
@@ -28,3 +31,12 @@ assert.equal(canUseSkill(100, 80), true, 'skill is available at enough energy');
 assert.equal(canUseSkill(50, 80), false, 'skill is unavailable without enough energy');
 
 console.log('game rules tests passed');
+
+test('advances a player through elapsed time after a hidden tab resumes', () => {
+  const player = new Player('test', 'cyan');
+  player.dropInterval = 100;
+  const startY = player.y;
+  const steps = advancePlayer(player, 250);
+  assert.equal(steps, 2);
+  assert.equal(player.y, startY + 2);
+});

@@ -1,4 +1,4 @@
-const { Player, addGarbageLines, createBoard } = HexGame;
+const { Player, addGarbageLines, createBoard, advancePlayer } = HexGame;
 
 const players = { a: new Player('我', 'cyan'), b: new Player('对手', 'pink') };
 players.a.dropInterval = 760;
@@ -128,6 +128,7 @@ function applyRemoteState(state) {
   remote.alive = state.alive !== false;
   remote.jammed = state.jammed === true;
   remote.reversed = state.reversed === true;
+  remote.lastSnapshotAt = Date.now();
   if (state.current) {
     remote.current = { name: 'remote', cells: state.current.cells, color: state.current.color };
     remote.x = state.current.x;
@@ -315,17 +316,20 @@ bindTap('#join-room', () => {
 bindTap('#ready-room', () => { feedback('已发送准备状态', 'success'); network.ready(); });
 bindTap('#start-room', () => { feedback('正在开始比赛...', 'success'); network.start(); });
 
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) { hiddenAt = performance.now(); return; }
-  if (!hiddenAt || !online || !matchStarted || matchEnded) return;
-  const missedDrops = Math.min(30, Math.floor((performance.now() - hiddenAt) / players.a.dropInterval));
+function resumeAfterHidden() {
+  if (!hiddenAt || !online || roomStatus !== 'playing' || matchEnded) return;
+  const elapsed = Date.now() - hiddenAt;
   hiddenAt = 0;
-  for (let i = 0; i < missedDrops && players.a.alive; i += 1) {
-    if (!players.a.softDrop()) players.a.lock();
-  }
+  advancePlayer(players.a, elapsed);
   paint('a');
   network.state(stateOf(players.a));
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { hiddenAt = Date.now(); return; }
+  resumeAfterHidden();
 });
+window.addEventListener('focus', resumeAfterHidden);
 
 function paint(key) {
   const player = players[key];
@@ -425,7 +429,7 @@ function useSkill(button) {
       network.command({ type: 'skill', skill: button.dataset.skill });
       skillSyncPauseUntil = performance.now() + 500;
     }
-    if (!localBlocked) animateSkill(button.dataset.skill, online ? selfId : `local-${key}`);
+    if (!online && !localBlocked) animateSkill(button.dataset.skill, `local-${key}`);
     log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
     feedback(`已释放 ${skillNames[button.dataset.skill]}，剩余 ${player.energy} 能量`, 'success');
     paint('a'); paint('b');
@@ -492,13 +496,11 @@ function loop(now) {
     if (online && !matchStarted) return;
     const player = players[key];
     if (!player.alive) return;
-    player.lastDrop += delta;
-    if (player.lastDrop >= player.dropInterval) {
-      player.lastDrop = 0;
-      if (!player.softDrop()) player.lock();
-      paint(key);
-    }
+    if (advancePlayer(player, delta, 2) > 0) paint(key);
   });
+  if (online && matchStarted && players.b.alive && Date.now() - (players.b.lastSnapshotAt || 0) > 350) {
+    if (advancePlayer(players.b, delta, 2) > 0) paint('b');
+  }
   if (online && matchStarted && !matchEnded && !players.a.alive) finishMatch('你输了');
   if (online && matchStarted && now >= skillSyncPauseUntil && now - lastStateSent >= 100) {
     lastStateSent = now;

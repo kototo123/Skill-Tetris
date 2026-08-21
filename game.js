@@ -120,7 +120,19 @@
     }
   }
 
-  const api = { SHAPES, createBoard, rotate, rotateCounterClockwise, collides, mergePiece, clearLines, addGarbageLines, canUseSkill, randomShape, Player };
+  function advancePlayer(player, elapsed, maxSteps = 120) {
+    if (!player || !player.alive) return 0;
+    player.lastDrop += Math.max(0, Number(elapsed) || 0);
+    let steps = 0;
+    while (player.alive && player.lastDrop >= player.dropInterval && steps < maxSteps) {
+      player.lastDrop -= player.dropInterval;
+      if (!player.softDrop()) player.lock();
+      steps += 1;
+    }
+    return steps;
+  }
+
+  const api = { SHAPES, createBoard, rotate, rotateCounterClockwise, collides, mergePiece, clearLines, addGarbageLines, canUseSkill, randomShape, Player, advancePlayer };
   if (typeof module !== 'undefined') module.exports = api;
   root.HexGame = api;
 })(typeof window !== 'undefined' ? window : globalThis);
