@@ -1,8 +1,15 @@
 const { Player, addGarbageLines, createBoard, advancePlayer } = HexGame;
+const skillCatalog = {
+  jam: ['锁定', '禁止旋转 · 10'], reverse: ['反向操控', '左右旋转反向 · 10'], swapShape: ['形态交换', '交换双方当前形状 · 25'], slam: ['坠落', '强制对方硬降 · 35'],
+  reshape: ['重构', '整理底部四行 · 25'], store: ['储存', '暂存当前方块 · 15'], predict: ['预测', '显示后续方块 · 15'], reflect: ['反弹', '反弹下一次攻击 · 25'], clearTop: ['天降清除', '消除最上面一行 · 40'], copyBoard: ['复制底板', '记录当前棋盘 · 35']
+};
+const skillCosts = { cleanse: 20, jam: 10, reverse: 10, swapShape: 25, slam: 35, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35 };
 
 const players = { a: new Player('我', 'cyan'), b: new Player('对手', 'pink') };
 players.a.dropInterval = 760;
 players.b.dropInterval = 760;
+players.a.skills = [];
+players.b.skills = [];
 
 let online = false;
 let selfId = '';
@@ -14,9 +21,9 @@ let lastStateSent = 0;
 let skillSyncPauseUntil = 0;
 let hiddenAt = 0;
 let roomStatus = 'waiting';
+let lastAckSeq = 0;
 let lastRoomSignature = '';
 const logEl = document.querySelector('#log');
-const skillNames = { jam: '干扰锁定', reverse: '反向操控', shield: '棱镜护盾', cleanse: '净化' };
 const feedbackEl = document.querySelector('#action-feedback');
 const presenceEl = document.querySelector('#room-presence');
 const roomToastEl = document.querySelector('#room-toast');
@@ -25,6 +32,41 @@ const appEl = document.querySelector('.app');
 let feedbackTimer = 0;
 let roomToastTimer = 0;
 let resultTimer = 0;
+
+function renderSkillHand(key) {
+  const slots = document.querySelector(`#skill-slots-${key}`);
+  if (!slots) return;
+  slots.innerHTML = '';
+  const hand = players[key].skills || [];
+  const visibleCards = key === 'b' && online ? hand.map(() => null) : hand.slice();
+  if (key === 'a' && players[key].copyExpiresAt > Date.now()) visibleCards.push('copyRestore');
+  visibleCards.slice(0, 3).forEach(skill => {
+    const button = document.createElement('button');
+    if (!skill) {
+      button.className = 'skill-card-back';
+      button.disabled = true;
+      button.innerHTML = '未知<small>对手手牌</small>';
+    } else {
+      const actualSkill = skill === 'copyRestore' ? 'copyBoard' : skill;
+      button.className = 'skill'; button.dataset.player = key; button.dataset.skill = actualSkill;
+      if (skill === 'copyRestore') {
+        button.dataset.restore = 'true';
+        button.innerHTML = '回到底板<small>5秒内免费</small>';
+      } else {
+        const definition = skillCatalog[skill] || [skill, '随机技能'];
+        button.innerHTML = `${definition[0]}<small>${definition[1]}</small>`;
+      }
+    }
+    slots.appendChild(button);
+  });
+  for (let index = visibleCards.length; index < 3; index += 1) {
+    const empty = document.createElement('button');
+    empty.className = 'skill-slot-empty'; empty.disabled = true; empty.textContent = '空卡槽';
+    slots.appendChild(empty);
+  }
+}
+
+function renderAllSkillHands() { renderSkillHand('a'); renderSkillHand('b'); }
 
 function feedback(message, tone = '') {
   feedbackEl.textContent = message;
@@ -86,20 +128,17 @@ function log(message) {
   while (logEl.children.length > 8) logEl.lastChild.remove();
 }
 
-function animateSkill(skill, actorId) {
+function animateSkill(skill, actorId, effect = null) {
   const isSelf = actorId === selfId || (!online && actorId === 'local-a');
-  const targetKey = skill === 'jam' || skill === 'reverse' ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
+  const attack = ['jam', 'reverse', 'swapShape', 'slam'].includes(skill);
+  const targetKey = online && effect?.targetId
+    ? (effect.targetId === selfId ? 'a' : 'b')
+    : attack ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
   const target = document.querySelector('#board-' + targetKey)?.closest('.player');
   if (!target) return;
   const toast = document.querySelector('#skill-toast');
   const flash = document.querySelector('#screen-flash');
-  const label = skill === 'jam'
-    ? (isSelf ? '干扰锁定！' : '对手锁定了你的方块')
-    : skill === 'reverse'
-      ? (isSelf ? '反向操控！' : '你的操作方向反了')
-      : skill === 'cleanse'
-        ? (isSelf ? '净化启动' : '对手使用了净化')
-        : (isSelf ? '棱镜护盾启动' : '对手启动棱镜护盾');
+  const label = skill === 'draw' ? (isSelf ? '抽到新技能' : '对手抽取了技能') : `${isSelf ? '发动' : '对手使用'} ${skillCatalog[skill]?.[0] || '技能'}`;
   toast.textContent = label;
   toast.classList.remove('show');
   flash.classList.remove('show');
@@ -107,8 +146,8 @@ function animateSkill(skill, actorId) {
   void target.offsetWidth;
   void toast.offsetWidth;
   toast.classList.add('show');
-  if (skill === 'jam' || skill === 'reverse') {
-    target.classList.add(isSelf ? 'skill-cast' : 'skill-hit');
+  if (attack) {
+    target.classList.add(effect?.reflected || !isSelf ? 'skill-hit' : 'skill-cast');
     flash.classList.add('show');
   } else if (skill === 'shield') {
     target.classList.add('skill-shield');
@@ -131,6 +170,8 @@ function applyRemoteState(state) {
   remote.alive = state.alive !== false;
   remote.jammed = state.jammed === true;
   remote.reversed = state.reversed === true;
+  remote.reflect = state.reflect === true;
+  remote.skills = Array.isArray(state.skills) ? state.skills.slice() : remote.skills;
   remote.lastSnapshotAt = Date.now();
   if (state.current) {
     remote.current = { name: 'remote', cells: state.current.cells, color: state.current.color };
@@ -138,6 +179,7 @@ function applyRemoteState(state) {
     remote.y = state.current.y;
   }
   paint('b');
+  renderSkillHand('b');
   if (!remote.alive) finishMatch('你赢了');
 }
 
@@ -148,8 +190,28 @@ function applySelfState(state) {
   // replacing the active piece on every snapshot causes visible rubber-banding.
   if (Number.isFinite(state.energy) && state.energy > local.energy) local.energy = state.energy;
   local.alive = state.alive !== false;
+  local.reflect = state.reflect === true;
+  local.copyExpiresAt = state.copyRemainingMs > 0 ? Date.now() + state.copyRemainingMs : 0;
+  local.predictUntil = state.predictRemainingMs > 0 ? Date.now() + state.predictRemainingMs : local.predictUntil || 0;
+  if (Array.isArray(state.skills)) { local.skills = state.skills.slice(); renderSkillHand('a'); }
   if (!local.alive) finishMatch('你输了');
   paint('a');
+}
+
+function applyCurrentSnapshot(player, current) {
+  if (!current || !Array.isArray(current.cells)) return;
+  player.current = { name: current.name || 'skill', cells: current.cells.map(row => row.slice()), color: current.color || player.color };
+  if (Number.isFinite(current.x)) player.x = current.x;
+  if (Number.isFinite(current.y)) player.y = current.y;
+}
+
+function renderPrediction(key) {
+  const player = players[key];
+  const element = document.querySelector(`#prediction-${key}`);
+  if (!element) return;
+  const active = player.predictUntil > Date.now();
+  element.classList.toggle('show', active);
+  element.textContent = active ? `下: ${(player.nextQueue || []).map(piece => piece.name).join(' · ')}` : '';
 }
 
 function showCountdown(value) {
@@ -193,6 +255,8 @@ function resetMatch() {
   players.b = new Player('对手', 'pink');
   players.a.dropInterval = 760;
   players.b.dropInterval = 760;
+  players.a.skills = [];
+  players.b.skills = [];
   matchEnded = false;
   matchStarted = false;
   const result = document.querySelector('#result');
@@ -203,6 +267,7 @@ function resetMatch() {
   clearTimeout(resultTimer);
   paint('a');
   paint('b');
+  renderAllSkillHands();
 }
 
 function finishMatch(message) {
@@ -230,6 +295,7 @@ const network = new MatchClient({
   onEvent: event => {
     if (event.selfId) { selfId = event.selfId; online = true; setOnlineControls(); }
     if (event.room) {
+      lastAckSeq = Math.max(lastAckSeq, Number(event.room.seq) || 0);
       hostId = event.room.players[0]?.playerId || '';
       document.querySelector('#room-code').value = event.room.code;
       document.querySelector('#snapshot').textContent = `${event.room.status} · ${event.room.players.length}/2 players · seq ${event.room.seq}`;
@@ -258,12 +324,18 @@ const network = new MatchClient({
       if (opponent) applyRemoteState(opponent.state);
     }
     if (event.type === 'countdown') { showCountdown(event.countdown || 3); runCountdown(event.countdown || 3); }
-    if (event.type === 'command' && event.payload?.type === 'skill') {
-      const name = event.payload.skill === 'jam' ? '干扰锁定' : event.payload.skill === 'reverse' ? '反向操控' : event.payload.skill === 'cleanse' ? '净化' : '棱镜护盾';
+    if (event.type === 'command' && (event.payload?.type === 'skill' || event.payload?.type === 'drawSkill')) {
+      const skill = event.payload.skill || event.effect?.skill;
+      const name = event.payload?.type === 'drawSkill' ? '抽取技能' : (skillCatalog[skill]?.[0] || (skill === 'cleanse' ? '净化' : '新技能'));
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
       if (event.playerId === selfId && Number.isFinite(event.effect?.energy)) {
         players.a.energy = event.effect.energy;
+        if (Array.isArray(event.effect.hand)) players.a.skills = event.effect.hand.slice();
         paint('a');
+        renderSkillHand('a');
+      }
+      if (event.payload?.type === 'drawSkill') {
+        animateSkill('draw', event.playerId, event.effect);
       }
       if (event.effect?.targetId === selfId && event.effect.garbageLines > 0) {
         players.a.board = addGarbageLines(players.a.board, event.effect.garbageLines);
@@ -285,10 +357,53 @@ const network = new MatchClient({
         paint('a');
         log('你的左右和旋转方向被反转了');
       }
-      if (event.effect?.blocked) log('护盾抵挡了这次攻击');
+      if (event.effect?.targetId === selfId && event.effect?.forceDrop) {
+        players.a.hardDrop();
+        paint('a');
+        network.state(stateOf(players.a));
+      }
+      if (event.effect?.targetId === selfId && event.effect?.store) {
+        players.a.held = players.a.current;
+        players.a.spawn();
+        paint('a');
+      }
+      if (event.effect?.targetId === selfId && event.effect?.predictDurationMs) {
+        players.a.predictUntil = Date.now() + event.effect.predictDurationMs;
+        renderPrediction('a');
+        feedback('预测已开启：后续三块可见', 'success');
+      }
+      if (event.effect?.targetId === selfId && event.effect?.reflect) {
+        players.a.reflect = true;
+        feedback('反弹已就绪：下一次攻击会弹回', 'success');
+      }
+      if (event.effect?.targetId === selfId && Array.isArray(event.effect?.board)) {
+        players.a.board = event.effect.board.map(row => row.slice());
+        paint('a');
+      }
+      if (event.playerId === selfId && event.effect?.copyArmed) {
+        players.a.copyExpiresAt = Date.now() + (event.effect.copyDurationMs || 5000);
+        renderSkillHand('a');
+        feedback('底板已记录，5秒内可恢复', 'success');
+      }
+      if (event.effect?.targetId === selfId && event.effect?.restoreCopy) {
+        players.a.copyExpiresAt = 0;
+        if (Array.isArray(event.effect.board)) players.a.board = event.effect.board.map(row => row.slice());
+        applyCurrentSnapshot(players.a, event.effect.current);
+        renderSkillHand('a');
+        paint('a');
+      }
+      if (event.effect?.swapShape && event.effect.players) {
+        const selfPiece = event.effect.players[selfId]?.current;
+        const opponentId = Object.keys(event.effect.players).find(id => id !== selfId);
+        applyCurrentSnapshot(players.a, selfPiece);
+        applyCurrentSnapshot(players.b, event.effect.players[opponentId]?.current);
+        paint('a'); paint('b');
+      }
+      if (event.effect?.reflected) log('攻击被反弹回施法者');
+      else if (event.effect?.blocked) log('防御技能抵挡了这次攻击');
     }
     if (event.type === 'command' && event.payload?.type === 'skill') {
-      animateSkill(event.payload.skill, event.playerId);
+      animateSkill(event.payload.skill, event.playerId, event.effect);
     }
     if (event.type === 'error') { log(`技能/网络错误: ${event.code}`); feedback(`房间操作失败：${event.code}`, 'error'); }
     if (event.disconnectedId && event.disconnectedId !== selfId) { log('对手已离线'); showRoomToast('对手已离开房间'); setRoomView('waiting'); }
@@ -349,10 +464,17 @@ function paint(key) {
   document.querySelector('#energy-' + key).textContent = `${player.energy} / 100`;
   document.querySelector('#fill-' + key).style.width = `${player.energy}%`;
   document.querySelectorAll(`.skill[data-player="${key}"]`).forEach(button => {
-    const cost = 10;
+    const cost = button.dataset.restore === 'true' ? 0 : (skillCosts[button.dataset.skill] || 10);
     button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || !player.alive;
     button.classList.toggle('insufficient', player.energy < cost);
   });
+  const draw = document.querySelector(`.draw-skill[data-player="${key}"]`);
+  if (draw) {
+    const occupied = (player.skills || []).length + (player.copyExpiresAt > Date.now() ? 1 : 0);
+    draw.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || !player.alive || player.energy < 10 || occupied >= 3;
+    draw.classList.toggle('insufficient', player.energy < 10 || occupied >= 3);
+  }
+  renderPrediction(key);
 }
 
 function commandFor(action) {
@@ -395,47 +517,62 @@ document.querySelectorAll('.controls button').forEach(button => {
   };
 });
 
+function drawSkill(key = 'a') {
+  if (online && key !== 'a') return;
+  if (online && (roomStatus !== 'playing' || matchEnded)) return;
+  const player = players[key];
+  const occupied = (player.skills || []).length + (player.copyExpiresAt > Date.now() ? 1 : 0);
+  if (occupied >= 3) { feedback('技能卡槽已满', 'warn'); return; }
+  if (player.energy < 10) { feedback(`能量不足：${player.energy} / 10`, 'error'); return; }
+  if (online) {
+    network.state(stateOf(player));
+    network.command({ type: 'drawSkill' });
+    skillSyncPauseUntil = performance.now() + 500;
+    return;
+  }
+  const keys = Object.keys(skillCatalog);
+  player.energy -= 10;
+  player.skills = [...(player.skills || []), keys[Math.floor(Math.random() * keys.length)]];
+  renderSkillHand(key); paint(key); animateSkill('draw', `local-${key}`);
+}
+
 function useSkill(button) {
-    const key = button.dataset.player;
-    if (online && key !== 'a') return;
-    if (online && (roomStatus !== 'playing' || matchEnded)) return;
-    const player = players[key];
-    const cost = 10;
-    if (player.energy < cost) {
-      button.classList.remove('action-denied'); void button.offsetWidth; button.classList.add('action-denied');
-      log('能量不足，需要 10 点');
-      feedback(`能量不足：${player.energy} / ${cost}`, 'error');
-      return;
-    }
-    button.classList.remove('action-success'); void button.offsetWidth; button.classList.add('action-success');
-    player.energy -= cost;
-    let localBlocked = false;
-    if (!online) {
-      const opponent = key === 'a' ? players.b : players.a;
-      const attack = button.dataset.skill === 'jam' || button.dataset.skill === 'reverse';
-      if (attack && opponent.shield) {
-        opponent.shield = false;
-        localBlocked = true;
-        log('护盾抵挡了这次攻击');
-      } else {
-        if (button.dataset.skill === 'jam') opponent.jammed = true;
-        if (button.dataset.skill === 'reverse') opponent.reversed = true;
-      }
-    }
-    if (button.dataset.skill === 'shield') player.shield = true;
-    if (button.dataset.skill === 'cleanse') {
-      player.board = cleanseBoard(player.board, 2);
-      player.jammed = false;
-      player.reversed = false;
-    }
-    if (online) {
-      network.command({ type: 'skill', skill: button.dataset.skill });
-      skillSyncPauseUntil = performance.now() + 500;
-    }
-    if (!online && !localBlocked) animateSkill(button.dataset.skill, `local-${key}`);
-    log(`已释放 ${skillNames[button.dataset.skill]}，消耗 ${cost} 能量`);
-    feedback(`已释放 ${skillNames[button.dataset.skill]}，剩余 ${player.energy} 能量`, 'success');
-    paint('a'); paint('b');
+  const key = button.dataset.player;
+  if (online && key !== 'a') return;
+  if (online && (roomStatus !== 'playing' || matchEnded)) return;
+  const player = players[key];
+  const skill = button.dataset.skill;
+  const restoringCopy = skill === 'copyBoard' && button.dataset.restore === 'true' && player.copyExpiresAt > Date.now();
+  const cost = restoringCopy ? 0 : (skillCosts[skill] || 10);
+  if (skill !== 'cleanse' && !restoringCopy && !(player.skills || []).includes(skill)) return;
+  if (player.energy < cost) { feedback(`能量不足：${player.energy} / ${cost}`, 'error'); return; }
+  button.classList.remove('action-success'); void button.offsetWidth; button.classList.add('action-success');
+  if (online) {
+    network.state(stateOf(player));
+    network.command({ type: 'skill', skill });
+    skillSyncPauseUntil = performance.now() + 500;
+    return;
+  }
+  player.energy -= cost;
+  if (skill !== 'cleanse' && !restoringCopy) {
+    const index = player.skills.indexOf(skill);
+    if (index >= 0) player.skills.splice(index, 1);
+  }
+  if (skill === 'cleanse') { player.jammed = false; player.reversed = false; }
+  if (skill === 'reflect') player.reflect = true;
+  if (skill === 'store') { player.held = player.current; player.spawn(); }
+  if (skill === 'predict') { player.predictUntil = Date.now() + 8000; renderPrediction(key); }
+  if (skill === 'clearTop') player.board = clearHighestOccupiedRow(player.board);
+  if (skill === 'reshape') player.board = reshapeBottom(player.board);
+  if (skill === 'copyBoard' && restoringCopy) {
+    player.board = player.copyBoard.board.map(row => row.slice());
+    applyCurrentSnapshot(player, player.copyBoard.current);
+    player.copyBoard = null; player.copyExpiresAt = 0;
+  } else if (skill === 'copyBoard') {
+    player.copyBoard = { board: player.board.map(row => row.slice()), current: { cells: player.current.cells.map(row => row.slice()), x: player.x, y: player.y, color: player.current.color } };
+    player.copyExpiresAt = Date.now() + 5000;
+  }
+  renderSkillHand(key); paint(key); animateSkill(skill, `local-${key}`);
 }
 
 let lastSkillPointer = 0;
@@ -452,6 +589,21 @@ document.addEventListener('click', event => {
   if (Date.now() - lastSkillPointer < 600) return;
   event.preventDefault();
   useSkill(button);
+});
+
+let lastDrawPointer = 0;
+document.addEventListener('pointerup', event => {
+  const button = event.target.closest?.('.draw-skill');
+  if (!button) return;
+  event.preventDefault();
+  lastDrawPointer = Date.now();
+  drawSkill(button.dataset.player);
+}, { passive: false });
+document.addEventListener('click', event => {
+  const button = event.target.closest?.('.draw-skill');
+  if (!button || Date.now() - lastDrawPointer < 600) return;
+  event.preventDefault();
+  drawSkill(button.dataset.player);
 });
 
 document.addEventListener('pointerdown', event => {
@@ -483,9 +635,31 @@ function cleanseBoard(board, count) {
   return rows;
 }
 
+function clearHighestOccupiedRow(board) {
+  const rows = board.map(row => row.slice());
+  const index = rows.findIndex(row => row.some(Boolean));
+  if (index < 0) return rows;
+  rows.splice(index, 1);
+  rows.unshift(Array(rows[0]?.length || 10).fill(0));
+  return rows;
+}
+
+function reshapeBottom(board, depth = 4) {
+  const rows = board.map(row => row.slice());
+  const start = Math.max(0, rows.length - depth);
+  const width = rows[0]?.length || 10;
+  const colors = rows.slice(start).flat().filter(Boolean);
+  const rebuilt = Array.from({ length: rows.length - start }, () => Array(width).fill(0));
+  colors.forEach((color, index) => {
+    const row = rebuilt.length - 1 - Math.floor(index / Math.max(1, width - 1));
+    if (row >= 0) rebuilt[row][index % Math.max(1, width - 1)] = color;
+  });
+  return [...rows.slice(0, start), ...rebuilt];
+}
+
 function stateOf(player) {
   return {
-    score: player.score, energy: player.energy, alive: player.alive, jammed: player.jammed === true, reversed: player.reversed === true, board: player.board,
+    score: player.score, energy: player.energy, ackSeq: lastAckSeq, alive: player.alive, jammed: player.jammed === true, reversed: player.reversed === true, skills: player.skills || [], board: player.board,
     current: { cells: player.current.cells, x: player.x, y: player.y, color: player.current.color }
   };
 }
@@ -509,7 +683,14 @@ function loop(now) {
     lastStateSent = now;
     network.state(stateOf(players.a));
   }
+  if (players.a.copyExpiresAt && players.a.copyExpiresAt <= Date.now()) {
+    players.a.copyExpiresAt = 0;
+    players.a.copyBoard = null;
+    renderSkillHand('a');
+  }
+  renderPrediction('a');
   requestAnimationFrame(loop);
 }
 
+renderAllSkillHands();
 paint('a'); paint('b'); setOnlineControls(); setRoomView('waiting'); log('请创建或加入房间'); requestAnimationFrame(loop);

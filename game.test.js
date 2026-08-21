@@ -40,3 +40,12 @@ test('advances a player through elapsed time after a hidden tab resumes', () => 
   assert.equal(steps, 2);
   assert.equal(player.y, startY + 2);
 });
+
+test('keeps a three-piece preview queue and advances it on spawn', () => {
+  const player = new Player('test', 'cyan');
+  assert.equal(player.nextQueue.length, 3);
+  const expected = player.nextQueue[0].name;
+  player.spawn();
+  assert.equal(player.current.name, expected);
+  assert.equal(player.nextQueue.length, 3);
+});

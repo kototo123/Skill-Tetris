@@ -70,7 +70,8 @@
       this.color = color;
       this.board = createBoard();
       this.current = randomShape();
-      this.next = randomShape();
+      this.nextQueue = [randomShape(), randomShape(), randomShape()];
+      this.next = this.nextQueue[0];
       this.x = 3;
       this.y = -1;
       this.energy = 20;
@@ -84,8 +85,9 @@
     }
 
     spawn() {
-      this.current = this.next;
-      this.next = randomShape();
+      this.current = this.nextQueue.shift();
+      this.nextQueue.push(randomShape());
+      this.next = this.nextQueue[0];
       this.x = Math.floor((10 - this.current.cells[0].length) / 2);
       this.y = -1;
       if (collides(this.board, this.current.cells, this.x, this.y)) this.alive = false;

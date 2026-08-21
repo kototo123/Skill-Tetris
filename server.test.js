@@ -19,6 +19,235 @@ test('joins a room by code and reaches ready when both players ready', () => {
   assert.equal(manager.setReady(room.code, 'p2').status, 'ready');
 });
 
+test('gives each player random skill cards while keeping cleanse fixed', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  const state = room.states.get('p1');
+  assert.equal(Array.isArray(state.skills), true);
+  assert.equal(state.skills.length, 3);
+  assert.equal(state.skills.includes('cleanse'), false);
+});
+
+test('drawSkill spends energy and adds one card to the hand', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  room.status = 'playing';
+  const state = room.states.get('p1');
+  state.energy = 10;
+  state.skills = [];
+  const command = manager.recordCommand(room.code, 'p1', { type: 'drawSkill' });
+  assert.equal(command.effect.cost, 10);
+  assert.equal(room.states.get('p1').energy, 0);
+  assert.equal(room.states.get('p1').skills.length, 1);
+});
+
+test('fixed cleanse can be used without owning a card and cards are consumed', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  room.status = 'playing';
+  const state = room.states.get('p1');
+  state.energy = 40;
+  state.skills = ['reshape'];
+  const command = manager.recordCommand(room.code, 'p1', { type: 'skill', skill: 'cleanse' });
+  assert.equal(command.effect.cost, 20);
+  assert.deepEqual(room.states.get('p1').skills, ['reshape']);
+  room.states.get('p1').energy = 25;
+  manager.recordCommand(room.code, 'p1', { type: 'skill', skill: 'reshape' });
+  assert.deepEqual(room.states.get('p1').skills, []);
+});
+
+test('drawSkill rejects a full three-card hand without spending energy', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  room.status = 'playing';
+  const state = room.states.get('p1');
+  state.energy = 50;
+  state.skills = ['jam', 'reverse', 'slam'];
+  assert.throws(() => manager.recordCommand(room.code, 'p1', { type: 'drawSkill' }), /SKILL_HAND_FULL/);
+  assert.equal(state.energy, 50);
+  assert.equal(room.commands.length, 0);
+});
+
+test('attack cards cannot be forged when they are not in the server hand', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 100, skills: [] });
+
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' }), /SKILL_NOT_OWNED/);
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'reverse' }), /SKILL_NOT_OWNED/);
+  assert.equal(room.states.get('host').energy, 100);
+});
+
+test('removed shield commands cannot be forged after the skill leaves the card pool', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 100, skills: [] });
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'shield' }), /INVALID_SKILL/);
+});
+
+test('stale state snapshots cannot refund energy spent by a skill command', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  room.status = 'playing';
+  Object.assign(room.states.get('p1'), { energy: 20, skills: [] });
+  const command = manager.recordCommand(room.code, 'p1', { type: 'drawSkill' });
+  assert.equal(command.seq, 1);
+
+  manager.updateState(room.code, 'p1', { energy: 20, ackSeq: 0 });
+  assert.equal(room.states.get('p1').energy, 10);
+
+  manager.updateState(room.code, 'p1', { energy: 28, ackSeq: 1 });
+  assert.equal(room.states.get('p1').energy, 10);
+
+  manager.updateState(room.code, 'p1', { score: 100, energy: 28, ackSeq: 1 });
+  assert.equal(room.states.get('p1').energy, 28);
+});
+
+test('consecutive line clears keep the client combo energy reward', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('p1');
+  room.status = 'playing';
+  manager.updateState(room.code, 'p1', { score: 100, energy: 42 });
+  manager.updateState(room.code, 'p1', { score: 200, energy: 68 });
+  assert.equal(room.states.get('p1').energy, 68);
+});
+
+test('using one duplicated card leaves the other copy in hand', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 50, skills: ['predict', 'predict'] });
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'predict' });
+  assert.deepEqual(room.states.get('host').skills, ['predict']);
+});
+
+test('swapShape exchanges both active pieces and reports authoritative snapshots', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  const host = room.states.get('host');
+  const guest = room.states.get('guest');
+  host.energy = 25;
+  host.skills = ['swapShape'];
+  host.current = { cells: [[1, 1, 1, 1]], x: 3, y: 4, color: 'cyan' };
+  guest.current = { cells: [[1, 1], [1, 1]], x: 4, y: 7, color: 'yellow' };
+
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'swapShape' });
+
+  assert.deepEqual(room.states.get('host').current.cells, [[1, 1], [1, 1]]);
+  assert.deepEqual(room.states.get('guest').current.cells, [[1, 1, 1, 1]]);
+  assert.deepEqual(command.effect.players.host.current, room.states.get('host').current);
+  assert.deepEqual(command.effect.players.guest.current, room.states.get('guest').current);
+});
+
+test('swapShape clamps a wider incoming piece inside the ten-column board', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 25, skills: ['swapShape'], current: { cells: [[1, 1]], x: 8, y: 3, color: 'yellow' } });
+  room.states.get('guest').current = { cells: [[1, 1, 1, 1]], x: 3, y: 2, color: 'cyan' };
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'swapShape' });
+  assert.equal(room.states.get('host').current.x, 6);
+});
+
+test('swapShape lifts an incoming piece above occupied cells', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  const board = Array.from({ length: 20 }, () => Array(10).fill(0));
+  board[3][3] = 1;
+  Object.assign(room.states.get('host'), { energy: 25, skills: ['swapShape'], board, current: { cells: [[1]], x: 3, y: 3, color: 'red' } });
+  room.states.get('guest').current = { cells: [[1, 1, 1, 1]], x: 3, y: 2, color: 'cyan' };
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'swapShape' });
+  assert.equal(room.states.get('host').current.y < 3, true);
+});
+
+test('viewer snapshots hide the opponents random cards and saved board', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  Object.assign(room.states.get('guest'), { skills: ['slam', 'predict'], copyBoard: { board: [[1]], current: null, expiresAt: Date.now() + 5000 } });
+  const snapshot = manager.snapshot(room.code, 'host');
+  const guest = snapshot.players.find(player => player.playerId === 'guest');
+  assert.deepEqual(guest.state.skills, [null, null]);
+  assert.equal(guest.state.copyBoard, null);
+});
+
+test('reflect sends the next attack back to its caster and is consumed', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('guest'), { energy: 25, skills: ['reflect'] });
+  manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'reflect' });
+  Object.assign(room.states.get('host'), { energy: 10, skills: ['jam'] });
+
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
+
+  assert.equal(command.effect.reflected, true);
+  assert.equal(command.effect.targetId, 'host');
+  assert.equal(room.states.get('host').jammed, true);
+  assert.equal(room.states.get('guest').reflect, false);
+});
+
+test('slam marks the opponent for one forced hard drop', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 35, skills: ['slam'] });
+
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'slam' });
+
+  assert.equal(command.effect.forceDrop, true);
+  assert.equal(command.effect.targetId, 'guest');
+});
+
+test('clearTop removes the highest occupied row instead of an empty top row', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  const board = Array.from({ length: 20 }, () => Array(10).fill(0));
+  board[7][2] = 1;
+  board[8][3] = 1;
+  Object.assign(room.states.get('host'), { energy: 40, skills: ['clearTop'], board });
+
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'clearTop' });
+
+  assert.equal(room.states.get('host').board[7].every(cell => cell === 0), true);
+  assert.equal(room.states.get('host').board[8][3], 1);
+});
+
+test('copyBoard consumes one card to save a board and restores it once for free', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  const savedBoard = Array.from({ length: 20 }, () => Array(10).fill(0));
+  savedBoard[18][1] = 1;
+  const savedCurrent = { cells: [[1, 1]], x: 4, y: 8, color: 'cyan' };
+  Object.assign(room.states.get('host'), { energy: 35, skills: ['copyBoard'], board: savedBoard, current: savedCurrent });
+
+  const armed = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'copyBoard' });
+  assert.equal(armed.effect.copyArmed, true);
+  assert.equal(room.states.get('host').energy, 0);
+  assert.deepEqual(room.states.get('host').skills, []);
+
+  room.states.get('host').board = Array.from({ length: 20 }, () => Array(10).fill(8));
+  room.states.get('host').current = { cells: [[1]], x: 0, y: 0, color: 'red' };
+  const restored = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'copyBoard' });
+
+  assert.equal(restored.effect.restoreCopy, true);
+  assert.deepEqual(restored.effect.board, savedBoard);
+  assert.deepEqual(restored.effect.current, savedCurrent);
+  assert.equal(room.states.get('host').copyBoard, null);
+});
+
 test('records ordered player commands', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('p1');
@@ -35,7 +264,7 @@ test('rejects malformed commands and exposes authoritative snapshots', () => {
   room.status = 'playing';
   assert.throws(() => manager.recordCommand(room.code, 'p1', { type: 'move', direction: 0 }), /INVALID_DIRECTION/);
   manager.recordCommand(room.code, 'p1', { type: 'hardDrop' });
-  const snapshot = manager.updateState(room.code, 'p1', { score: 12, energy: 150, alive: true, board: [[1]] });
+  const snapshot = manager.updateState(room.code, 'p1', { score: 1000, energy: 150, alive: true, board: [[1]] });
   assert.equal(snapshot.seq, 1);
   assert.equal(snapshot.players.find(player => player.playerId === 'p1').state.energy, 100);
   assert.equal(snapshot.players.find(player => player.playerId === 'p2').connected, false);
@@ -61,6 +290,9 @@ test('serves the mobile client from the realtime server', async () => {
   assert.match(response.body, /id="lobby-overlay"/);
   assert.match(response.body, /id="countdown-value"/);
   assert.match(response.body, /id="result"/);
+  assert.match(response.body, /id="skills-a"/);
+  assert.match(response.body, /id="skill-slots-a"/);
+  assert.match(response.body, /class="draw-skill"/);
   assert.match(response.body, /lobby-overlay[^}]*pointer-events:none/);
   assert.match(response.body, /\.lobby-overlay\[hidden\]\{display:none!important\}/);
   assert.doesNotMatch(response.body, /连接快照/);
@@ -85,6 +317,9 @@ test('serves the synchronized mobile app script', async () => {
   assert.match(response.body, /showRoomToast/);
   assert.match(response.body, /setRoomView/);
   assert.match(response.body, /readyButton.textContent = selfRoomPlayer/);
+  assert.match(response.body, /network\.state\(stateOf\(player\)\)/);
+  assert.match(response.body, /copyDurationMs/);
+  assert.match(response.body, /predictDurationMs/);
 });
 
 test('returns a stable error when a client sends state before joining a room', async () => {
@@ -159,6 +394,40 @@ test('identifies each client and broadcasts the opponent active-piece snapshot',
   await new Promise(resolve => httpServer.close(resolve));
 });
 
+test('draw broadcasts reveal the new card only to its owner', async () => {
+  const { httpServer, wss, manager } = createServer();
+  await new Promise(resolve => httpServer.listen(0, '127.0.0.1', resolve));
+  const { port } = httpServer.address();
+  const host = await openSocket(port);
+  const guest = await openSocket(port);
+  const created = nextMessage(host, message => message.type === 'room');
+  host.send(JSON.stringify({ type: 'create' }));
+  const hostRoom = await created;
+  const joinedForGuest = nextMessage(guest, message => message.type === 'room');
+  guest.send(JSON.stringify({ type: 'join', code: hostRoom.room.code }));
+  const guestRoom = await joinedForGuest;
+  const room = manager.getRoom(hostRoom.room.code);
+  room.status = 'playing';
+  Object.assign(room.states.get(hostRoom.selfId), { energy: 10, skills: [] });
+
+  const ownerCommand = nextMessage(host, message => message.type === 'command' && message.payload?.type === 'drawSkill');
+  const opponentCommand = nextMessage(guest, message => message.type === 'command' && message.payload?.type === 'drawSkill');
+  host.send(JSON.stringify({ type: 'command', payload: { type: 'drawSkill' } }));
+  const ownerEvent = await ownerCommand;
+  const opponentEvent = await opponentCommand;
+
+  assert.equal(typeof ownerEvent.effect.skill, 'string');
+  assert.equal(ownerEvent.effect.hand.length, 1);
+  assert.equal(opponentEvent.effect.skill, undefined);
+  assert.equal(opponentEvent.effect.hand, undefined);
+  assert.deepEqual(opponentEvent.room.players.find(player => player.playerId === hostRoom.selfId).state.skills, [null]);
+  assert.equal(guestRoom.selfId !== hostRoom.selfId, true);
+
+  host.terminate(); guest.terminate();
+  await new Promise(resolve => wss.close(resolve));
+  await new Promise(resolve => httpServer.close(resolve));
+});
+
 test('stamps player snapshots with the time that player last updated state', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
@@ -220,7 +489,9 @@ test('starting a room resets player state and jam locks the opponent piece', () 
   assert.equal(room.states.get('host').score, 0);
   assert.equal(room.states.get('host').energy, 20);
   assert.equal(room.states.get('host').alive, true);
-  manager.updateState(room.code, 'host', { energy: 10, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  manager.updateState(room.code, 'host', { ackSeq: room.seq, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  room.states.get('host').energy = 10;
+  room.states.get('host').skills = ['jam'];
   const strike = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
   assert.equal(strike.effect.cost, 10);
   assert.equal(room.states.get('host').energy, 0);
@@ -228,15 +499,31 @@ test('starting a room resets player state and jam locks the opponent piece', () 
   assert.equal(room.states.get('guest').jammed, true);
 });
 
-test('preserves shield across state snapshots and rejects an unaffordable skill without recording it', () => {
+test('a stale snapshot from the previous round cannot overwrite the reset state', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.seq = 9;
+  manager.setReady(room.code, 'host');
+  manager.setReady(room.code, 'guest');
+  manager.startRoom(room.code, 'host');
+
+  manager.updateState(room.code, 'host', { energy: 88, score: 900, ackSeq: 9 });
+
+  assert.equal(room.states.get('host').energy, 20);
+  assert.equal(room.states.get('host').score, 0);
+  assert.equal(room.seq > 9, true);
+});
+
+test('preserves reflect across state snapshots and rejects an unaffordable skill without recording it', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 10, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
-  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'shield' });
+  Object.assign(room.states.get('host'), { energy: 25, skills: ['reflect', 'jam'], board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'reflect' });
   manager.updateState(room.code, 'host', { score: 3, energy: 0, board: Array.from({ length: 20 }, () => Array(10).fill(0)) });
-  assert.equal(room.states.get('host').shield, true);
+  assert.equal(room.states.get('host').reflect, true);
   assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' }), /INSUFFICIENT_ENERGY/);
   assert.equal(room.seq, 1);
   assert.equal(room.commands.length, 1);
@@ -258,13 +545,14 @@ test('blocks commands outside active play and reports jam target', () => {
   manager.joinRoom(room.code, 'guest');
   assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'move', direction: 1 }), /MATCH_NOT_PLAYING/);
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 10 });
-  manager.updateState(room.code, 'guest', { energy: 10 });
-  manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'shield' });
+  Object.assign(room.states.get('host'), { energy: 10, skills: ['jam'] });
+  Object.assign(room.states.get('guest'), { energy: 25, skills: ['reflect'] });
+  manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'reflect' });
   const blocked = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
   assert.equal(blocked.effect.blocked, true);
-  assert.equal(blocked.effect.jammed, false);
-  assert.equal(blocked.effect.targetId, 'guest');
+  assert.equal(blocked.effect.reflected, true);
+  assert.equal(blocked.effect.jammed, true);
+  assert.equal(blocked.effect.targetId, 'host');
   room.status = 'finished';
   assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'hardDrop' }), /MATCH_NOT_PLAYING/);
 });
@@ -319,7 +607,8 @@ test('accepts jam as a real low-cost skill', () => {
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 10 });
+  room.states.get('host').energy = 10;
+  room.states.get('host').skills = ['jam'];
   const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'jam' });
   assert.equal(command.effect.jammed, true);
   assert.equal(room.states.get('host').energy, 0);
@@ -330,7 +619,8 @@ test('accepts reverse as a low-cost attack and marks the opponent', () => {
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 10 });
+  room.states.get('host').energy = 10;
+  room.states.get('host').skills = ['reverse'];
   const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'reverse' });
   assert.equal(command.effect.reversed, true);
   assert.equal(command.effect.cost, 10);
@@ -343,7 +633,7 @@ test('targets cleanse at the caster and returns authoritative energy', () => {
   const room = manager.createRoom('host');
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
-  manager.updateState(room.code, 'host', { energy: 10 });
+  manager.updateState(room.code, 'host', { energy: 20 });
   const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
   assert.equal(command.effect.targetId, 'host');
   assert.equal(command.effect.energy, 0);
@@ -359,6 +649,25 @@ test('cleanse removes active attack debuffs', () => {
   assert.equal(command.effect.targetId, 'host');
   assert.equal(room.states.get('host').jammed, false);
   assert.equal(room.states.get('host').reversed, false);
+});
+
+test('using another defensive card does not secretly cleanse debuffs or cancel reflect', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), {
+    energy: 40,
+    skills: ['predict'],
+    jammed: true,
+    reversed: true,
+    reflect: true
+  });
+
+  manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'predict' });
+
+  assert.equal(room.states.get('host').jammed, true);
+  assert.equal(room.states.get('host').reversed, true);
+  assert.equal(room.states.get('host').reflect, true);
 });
 
 
