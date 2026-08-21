@@ -676,10 +676,14 @@ test('cleanse removes active attack debuffs', () => {
   manager.joinRoom(room.code, 'guest');
   room.status = 'playing';
   manager.updateState(room.code, 'host', { energy: 30, jammed: true, reversed: true });
+  Object.assign(room.states.get('host'), { blockedColumn: 2, blockedUntil: Date.now() + 15000, gravity: true });
   const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cleanse' });
   assert.equal(command.effect.targetId, 'host');
   assert.equal(room.states.get('host').jammed, false);
   assert.equal(room.states.get('host').reversed, false);
+  assert.equal(room.states.get('host').blockedColumn, null);
+  assert.equal(room.states.get('host').blockedUntil, 0);
+  assert.equal(room.states.get('host').gravity, false);
 });
 
 test('using another defensive card does not secretly cleanse debuffs or cancel reflect', () => {
@@ -725,7 +729,10 @@ test('new disruption attacks expose authoritative effects', () => {
 
   const zone = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'zone' });
   assert.equal(Number.isInteger(zone.effect.blockedColumn), true);
+  assert.equal([0, 1, 2, 7, 8, 9].includes(zone.effect.blockedColumn), true);
+  assert.equal(zone.effect.blockedDurationMs, 15000);
   assert.equal(guest.blockedColumn, zone.effect.blockedColumn);
+  assert.equal(guest.blockedUntil > Date.now() + 14500, true);
   const intercept = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'intercept' });
   assert.equal(intercept.effect.intercept, true);
   const offset = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'offset' });

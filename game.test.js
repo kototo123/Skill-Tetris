@@ -60,16 +60,41 @@ test('a blocked column prevents the active piece from entering it', () => {
   assert.equal(player.x, 3);
 });
 
-test('piece-scoped disruption clears after the piece locks', () => {
+test('a piece already overlapping the blocked column can keep falling', () => {
+  const player = new Player('zone victim', 'cyan');
+  player.board = createBoard();
+  player.current = { name: 'O', color: 'yellow', cells: [[1, 1], [1, 1]] };
+  player.x = 3;
+  player.y = 2;
+  player.blockedColumn = 3;
+
+  assert.equal(player.softDrop(), true);
+  assert.equal(player.y, 3);
+});
+
+test('gravity clears after locking while a timed blocked column persists', () => {
   const player = new Player('test', 'cyan');
   player.current = { name: 'O', color: 'yellow', cells: [[1, 1], [1, 1]] };
   player.x = 4;
   player.y = 18;
   player.blockedColumn = 2;
+  player.blockedUntil = Date.now() + 15000;
   player.gravity = true;
   player.lock();
-  assert.equal(player.blockedColumn, null);
+  assert.equal(player.blockedColumn, 2);
   assert.equal(player.gravity, false);
+});
+
+test('an expired blocked column no longer prevents movement', () => {
+  const player = new Player('test', 'cyan');
+  player.current = { name: 'O', color: 'yellow', cells: [[1, 1], [1, 1]] };
+  player.x = 3;
+  player.y = 0;
+  player.blockedColumn = 2;
+  player.blockedUntil = Date.now() - 1;
+  player.move(-1);
+  assert.equal(player.x, 2);
+  assert.equal(player.blockedColumn, null);
 });
 
 test('frenzy adds twelve energy per cleared line', () => {

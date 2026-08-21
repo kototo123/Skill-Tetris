@@ -1,7 +1,7 @@
 const { Player, addGarbageLines, createBoard, advancePlayer } = HexGame;
 const skillCatalog = {
   jam: ['锁定', '禁止旋转 · 10'], reverse: ['反向操控', '左右旋转反向 · 10'], swapShape: ['形态交换', '交换双方当前形状 · 25'], slam: ['坠落', '强制对方硬降 · 35'],
-  zone: ['禁区', '封锁随机一列 · 20'], intercept: ['截胡', '当前块换成下一块 · 25'], offset: ['错位', '左右偏移两格 · 25'], mirrorBoard: ['镜像棋盘', '左右翻转棋盘 · 50'], gravity: ['重力加速', '当前块三倍下落 · 25'], cardSwap: ['卡牌交换', '随机交换一张牌 · 30'],
+  zone: ['禁区', '封锁边侧一列15秒 · 20'], intercept: ['截胡', '当前块换成下一块 · 25'], offset: ['错位', '左右偏移两格 · 25'], mirrorBoard: ['镜像棋盘', '左右翻转棋盘 · 50'], gravity: ['重力加速', '当前块三倍下落 · 25'], cardSwap: ['卡牌交换', '随机交换一张牌 · 30'],
   reshape: ['重构', '整理底部四行 · 25'], store: ['储存', '暂存当前方块 · 15'], predict: ['预测', '显示后续方块 · 15'], reflect: ['反弹', '反弹下一次攻击 · 25'], clearTop: ['天降清除', '消除最上面一行 · 40'], copyBoard: ['复制底板', '记录当前棋盘 · 35'],
   drain: ['偷能', '吸取对方10能量 · 15'], reroll: ['换形', '重随机当前方块 · 15'], copy: ['复制', '复制对方最近技能 · 20'], gambler: ['赌徒', '随机品质新技能 · 10'], frenzy: ['狂热', '6秒清行额外能量 · 20'], unlockHardDrop: ['解锁硬降', '本局解锁硬降 · 80']
 };
@@ -185,6 +185,7 @@ function applyRemoteState(state) {
   remote.reversed = state.reversed === true;
   remote.reflect = state.reflect === true;
   remote.blockedColumn = Number.isInteger(state.blockedColumn) ? state.blockedColumn : null;
+  remote.blockedUntil = state.blockedRemainingMs > 0 ? Date.now() + state.blockedRemainingMs : 0;
   remote.gravity = state.gravity === true;
   remote.hardDropUnlocked = state.hardDropUnlocked === true;
   remote.frenzyUntil = state.frenzyRemainingMs > 0 ? Date.now() + state.frenzyRemainingMs : 0;
@@ -209,6 +210,7 @@ function applySelfState(state) {
   local.alive = state.alive !== false;
   local.reflect = state.reflect === true;
   local.blockedColumn = Number.isInteger(state.blockedColumn) ? state.blockedColumn : null;
+  local.blockedUntil = state.blockedRemainingMs > 0 ? Date.now() + state.blockedRemainingMs : 0;
   local.gravity = state.gravity === true;
   local.hardDropUnlocked = state.hardDropUnlocked === true;
   local.frenzyUntil = state.frenzyRemainingMs > 0 ? Date.now() + state.frenzyRemainingMs : local.frenzyUntil || 0;
@@ -367,6 +369,9 @@ const network = new MatchClient({
         players.a.board = cleanseBoard(players.a.board, event.effect.cleanse);
         players.a.jammed = false;
         players.a.reversed = false;
+        players.a.blockedColumn = null;
+        players.a.blockedUntil = 0;
+        players.a.gravity = false;
         paint('a');
       }
       if (event.effect?.targetId === selfId && event.effect?.jammed) {
@@ -381,7 +386,8 @@ const network = new MatchClient({
       }
       if (event.effect?.targetId === selfId && Number.isInteger(event.effect?.blockedColumn)) {
         players.a.blockedColumn = event.effect.blockedColumn;
-        feedback(`禁区已封锁第 ${event.effect.blockedColumn + 1} 列`, 'warn');
+        players.a.blockedUntil = Date.now() + (event.effect.blockedDurationMs || 15000);
+        feedback(`边侧第 ${event.effect.blockedColumn + 1} 列被封锁15秒`, 'warn');
       }
       if (event.effect?.targetId === selfId && event.effect?.intercept) {
         players.a.spawn();
@@ -627,7 +633,7 @@ function useSkill(button) {
     const index = player.skills.indexOf(card);
     if (index >= 0) player.skills.splice(index, 1);
   }
-  if (skill === 'cleanse') { player.jammed = false; player.reversed = false; }
+  if (skill === 'cleanse') { player.jammed = false; player.reversed = false; player.blockedColumn = null; player.blockedUntil = 0; player.gravity = false; }
   if (skill === 'unlockHardDrop') player.hardDropUnlocked = true;
   if (skill === 'reflect') player.reflect = true;
   if (skill === 'store') { player.held = player.current; player.spawn(); }
@@ -730,7 +736,7 @@ function reshapeBottom(board, depth = 4) {
 function stateOf(player) {
   return {
     score: player.score, energy: player.energy, ackSeq: lastAckSeq, alive: player.alive, jammed: player.jammed === true, reversed: player.reversed === true, skills: player.skills || [], board: player.board,
-    blockedColumn: player.blockedColumn, gravity: player.gravity === true, hardDropUnlocked: player.hardDropUnlocked === true,
+    blockedColumn: player.blockedColumn, blockedUntil: player.blockedUntil || 0, gravity: player.gravity === true, hardDropUnlocked: player.hardDropUnlocked === true,
     current: { cells: player.current.cells, x: player.x, y: player.y, color: player.current.color }
   };
 }
@@ -764,6 +770,13 @@ function loop(now) {
     players.a.copyBoard = null;
     renderSkillHand('a');
   }
+  Object.values(players).forEach(player => {
+    if (player.blockedUntil > 0 && player.blockedUntil <= Date.now()) {
+      player.blockedColumn = null;
+      player.blockedUntil = 0;
+      paint(player === players.a ? 'a' : 'b');
+    }
+  });
   renderPrediction('a');
   requestAnimationFrame(loop);
 }

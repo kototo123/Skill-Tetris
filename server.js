@@ -32,7 +32,7 @@ function randomCards(count = 3) {
 }
 
 function initialState(stateSeq = 0) {
-  return { score: 0, energy: 50, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null, hardDropUnlocked: false, blockedColumn: null, gravity: false, frenzyUntil: 0, lastSkill: null };
+  return { score: 0, energy: 50, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null, hardDropUnlocked: false, blockedColumn: null, blockedUntil: 0, gravity: false, frenzyUntil: 0, lastSkill: null };
 }
 
 function cloneValue(value) {
@@ -224,6 +224,7 @@ class RoomManager {
         attacker.jammed = false;
         attacker.reversed = false;
         attacker.blockedColumn = null;
+        attacker.blockedUntil = 0;
         attacker.gravity = false;
       }
       if (resolvedSkill === 'unlockHardDrop') attacker.hardDropUnlocked = true;
@@ -247,7 +248,11 @@ class RoomManager {
         if (resolvedSkill === 'jam') target.jammed = true;
         else if (resolvedSkill === 'reverse') target.reversed = true;
         else if (resolvedSkill === 'slam') target.forceDrop = true;
-        else if (resolvedSkill === 'zone') target.blockedColumn = Math.floor(Math.random() * 10);
+        else if (resolvedSkill === 'zone') {
+          const edgeColumns = [0, 1, 2, 7, 8, 9];
+          target.blockedColumn = edgeColumns[Math.floor(Math.random() * edgeColumns.length)];
+          target.blockedUntil = Date.now() + 15000;
+        }
         else if (resolvedSkill === 'intercept') target.intercept = true;
         else if (resolvedSkill === 'offset') target.offset = (Math.random() < 0.5 ? -1 : 1) * (weak ? 1 : gold ? 3 : 2);
         else if (resolvedSkill === 'gravity') target.gravity = true;
@@ -310,6 +315,7 @@ class RoomManager {
         cleanse: resolvedSkill === 'cleanse' ? 2 : 0,
         forceDrop: resolvedSkill === 'slam',
         blockedColumn: resolvedSkill === 'zone' ? target.blockedColumn : undefined,
+        blockedDurationMs: resolvedSkill === 'zone' ? 15000 : 0,
         intercept: resolvedSkill === 'intercept',
         offset: resolvedSkill === 'offset' ? target.offset : undefined,
         gravity: resolvedSkill === 'gravity',
@@ -364,6 +370,7 @@ class RoomManager {
     const nextEnergy = acceptsState && requestedEnergy > (previous.energy || 0)
       ? Math.min(requestedEnergy, (previous.energy || 0) + earnedEnergyCap, 100)
       : previous.energy || 0;
+    const blockActive = Number.isInteger(previous.blockedColumn) && (previous.blockedUntil || 0) > Date.now();
     room.states.set(playerId, {
       score: requestedScore,
       // State snapshots report energy earned by clearing lines. Skill spending
@@ -375,7 +382,8 @@ class RoomManager {
       jammed: acceptsState ? state?.jammed === true : previous.jammed === true,
       reversed: acceptsState ? state?.reversed === true : previous.reversed === true,
       hardDropUnlocked: previous.hardDropUnlocked === true,
-      blockedColumn: acceptsState && (state?.blockedColumn == null || Number.isInteger(state.blockedColumn)) ? state.blockedColumn : previous.blockedColumn ?? null,
+      blockedColumn: blockActive ? previous.blockedColumn : null,
+      blockedUntil: blockActive ? previous.blockedUntil : 0,
       gravity: acceptsState ? state?.gravity === true : previous.gravity === true,
       frenzyUntil: previous.frenzyUntil || 0,
       lastSkill: previous.lastSkill || null,
@@ -414,6 +422,8 @@ class RoomManager {
         state.copyRemainingMs = Math.max(0, (raw.copyBoard?.expiresAt || 0) - Date.now());
         state.predictRemainingMs = Math.max(0, (raw.predictUntil || 0) - Date.now());
         state.frenzyRemainingMs = Math.max(0, (raw.frenzyUntil || 0) - Date.now());
+        state.blockedRemainingMs = Math.max(0, (raw.blockedUntil || 0) - Date.now());
+        if (state.blockedRemainingMs <= 0) state.blockedColumn = null;
         state.copyBoard = state.copyRemainingMs > 0 ? { active: true } : null;
         if (viewerId && viewerId !== playerId) {
           state.skills = (raw.skills || []).map(() => null);
