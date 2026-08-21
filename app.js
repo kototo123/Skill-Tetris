@@ -1,9 +1,15 @@
 const { Player, addGarbageLines, createBoard, advancePlayer } = HexGame;
 const skillCatalog = {
   jam: ['锁定', '禁止旋转 · 10'], reverse: ['反向操控', '左右旋转反向 · 10'], swapShape: ['形态交换', '交换双方当前形状 · 25'], slam: ['坠落', '强制对方硬降 · 35'],
-  reshape: ['重构', '整理底部四行 · 25'], store: ['储存', '暂存当前方块 · 15'], predict: ['预测', '显示后续方块 · 15'], reflect: ['反弹', '反弹下一次攻击 · 25'], clearTop: ['天降清除', '消除最上面一行 · 40'], copyBoard: ['复制底板', '记录当前棋盘 · 35']
+  zone: ['禁区', '封锁随机一列 · 20'], intercept: ['截胡', '当前块换成下一块 · 25'], offset: ['错位', '左右偏移两格 · 25'], mirrorBoard: ['镜像棋盘', '左右翻转棋盘 · 50'], gravity: ['重力加速', '当前块三倍下落 · 25'], cardSwap: ['卡牌交换', '随机交换一张牌 · 30'],
+  reshape: ['重构', '整理底部四行 · 25'], store: ['储存', '暂存当前方块 · 15'], predict: ['预测', '显示后续方块 · 15'], reflect: ['反弹', '反弹下一次攻击 · 25'], clearTop: ['天降清除', '消除最上面一行 · 40'], copyBoard: ['复制底板', '记录当前棋盘 · 35'],
+  drain: ['偷能', '吸取对方10能量 · 15'], reroll: ['换形', '重随机当前方块 · 15'], copy: ['复制', '复制对方最近技能 · 20'], gambler: ['赌徒', '随机品质新技能 · 10'], frenzy: ['狂热', '6秒清行额外能量 · 20'], unlockHardDrop: ['解锁硬降', '本局解锁硬降 · 80']
 };
-const skillCosts = { cleanse: 30, jam: 10, reverse: 10, swapShape: 25, slam: 35, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35 };
+const skillCosts = { cleanse: 30, jam: 10, reverse: 10, swapShape: 25, slam: 35, zone: 20, intercept: 25, offset: 25, mirrorBoard: 50, gravity: 25, cardSwap: 30, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35, drain: 15, reroll: 15, copy: 20, gambler: 10, frenzy: 20, unlockHardDrop: 80 };
+const attackSkills = new Set(['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'drain']);
+function baseSkill(card) { return String(card || '').split('@')[0]; }
+function cardCost(card) { const [skill, modifier] = String(card || '').split('@'); const cost = skillCosts[skill] || 0; return modifier === 'discount' ? Math.max(5, cost - 5) : modifier === 'overload' ? cost + 10 : cost; }
+function cardLabel(card) { const modifier = String(card || '').split('@')[1]; return modifier === 'discount' ? '折扣' : modifier === 'overload' ? '过载' : modifier === 'weak' ? '残缺' : modifier === 'gold' ? '金色' : ''; }
 
 const players = { a: new Player('我', 'cyan'), b: new Player('对手', 'pink') };
 players.a.dropInterval = 760;
@@ -48,14 +54,17 @@ function renderSkillHand(key) {
       button.disabled = true;
       button.innerHTML = '未知<small>对手手牌</small>';
     } else {
-      const actualSkill = skill === 'copyRestore' ? 'copyBoard' : skill;
-      button.className = 'skill'; button.dataset.player = key; button.dataset.skill = actualSkill;
+      const actualSkill = skill === 'copyRestore' ? 'copyBoard' : baseSkill(skill);
+      button.className = 'skill'; button.dataset.player = key; button.dataset.skill = actualSkill; button.dataset.card = skill;
+      const modifier = String(skill).split('@')[1];
+      if (modifier) button.classList.add(`quality-${modifier}`);
       if (skill === 'copyRestore') {
         button.dataset.restore = 'true';
         button.innerHTML = '回到底板<small>5秒内免费</small>';
       } else {
-        const definition = skillCatalog[skill] || [skill, '随机技能'];
-        button.innerHTML = `${definition[0]}<small>${definition[1]}</small>`;
+        const definition = skillCatalog[actualSkill] || [actualSkill, '随机技能'];
+        const label = cardLabel(skill);
+        button.innerHTML = `${definition[0]}${label ? ` · ${label}` : ''}<small>${definition[1].replace(/·\s*\d+$/, `· ${cardCost(skill)}`)}</small>`;
       }
     }
     slots.appendChild(button);
@@ -131,7 +140,7 @@ function log(message) {
 
 function animateSkill(skill, actorId, effect = null) {
   const isSelf = actorId === selfId || (!online && actorId === 'local-a');
-  const attack = ['jam', 'reverse', 'swapShape', 'slam'].includes(skill);
+  const attack = attackSkills.has(skill);
   const targetKey = online && effect?.targetId
     ? (effect.targetId === selfId ? 'a' : 'b')
     : attack ? (isSelf ? 'b' : 'a') : (isSelf ? 'a' : 'b');
@@ -175,6 +184,10 @@ function applyRemoteState(state) {
   remote.jammed = state.jammed === true;
   remote.reversed = state.reversed === true;
   remote.reflect = state.reflect === true;
+  remote.blockedColumn = Number.isInteger(state.blockedColumn) ? state.blockedColumn : null;
+  remote.gravity = state.gravity === true;
+  remote.hardDropUnlocked = state.hardDropUnlocked === true;
+  remote.frenzyUntil = state.frenzyRemainingMs > 0 ? Date.now() + state.frenzyRemainingMs : 0;
   remote.skills = Array.isArray(state.skills) ? state.skills.slice() : remote.skills;
   if (pieceChanged) remote.lastSnapshotAt = Date.now();
   if (state.current && pieceChanged) {
@@ -195,6 +208,10 @@ function applySelfState(state) {
   if (Number.isFinite(state.energy) && state.energy > local.energy) local.energy = state.energy;
   local.alive = state.alive !== false;
   local.reflect = state.reflect === true;
+  local.blockedColumn = Number.isInteger(state.blockedColumn) ? state.blockedColumn : null;
+  local.gravity = state.gravity === true;
+  local.hardDropUnlocked = state.hardDropUnlocked === true;
+  local.frenzyUntil = state.frenzyRemainingMs > 0 ? Date.now() + state.frenzyRemainingMs : local.frenzyUntil || 0;
   local.copyExpiresAt = state.copyRemainingMs > 0 ? Date.now() + state.copyRemainingMs : 0;
   local.predictUntil = state.predictRemainingMs > 0 ? Date.now() + state.predictRemainingMs : local.predictUntil || 0;
   if (Array.isArray(state.skills)) { local.skills = state.skills.slice(); renderSkillHand('a'); }
@@ -333,9 +350,9 @@ const network = new MatchClient({
       const skill = event.payload.skill || event.effect?.skill;
       const name = event.payload?.type === 'drawSkill' ? '抽取技能' : (skillCatalog[skill]?.[0] || (skill === 'cleanse' ? '净化' : '新技能'));
       log(`${event.playerId === selfId ? '你' : '对手'} 使用了 ${name}`);
-      if (event.playerId === selfId && Number.isFinite(event.effect?.energy)) {
-        players.a.energy = event.effect.energy;
-        if (Array.isArray(event.effect.hand)) players.a.skills = event.effect.hand.slice();
+      if (Number.isFinite(event.effect?.energy)) players.a.energy = event.effect.energy;
+      if (Array.isArray(event.effect?.hand)) players.a.skills = event.effect.hand.slice();
+      if (Number.isFinite(event.effect?.energy) || Array.isArray(event.effect?.hand)) {
         paint('a');
         renderSkillHand('a');
       }
@@ -362,6 +379,25 @@ const network = new MatchClient({
         paint('a');
         log('你的左右和旋转方向被反转了');
       }
+      if (event.effect?.targetId === selfId && Number.isInteger(event.effect?.blockedColumn)) {
+        players.a.blockedColumn = event.effect.blockedColumn;
+        feedback(`禁区已封锁第 ${event.effect.blockedColumn + 1} 列`, 'warn');
+      }
+      if (event.effect?.targetId === selfId && event.effect?.intercept) {
+        players.a.spawn();
+        feedback('当前方块被截胡', 'warn');
+        network.state(stateOf(players.a));
+      }
+      if (event.effect?.targetId === selfId && Number.isFinite(event.effect?.offset)) {
+        const step = Math.sign(event.effect.offset);
+        for (let index = 0; index < Math.abs(event.effect.offset); index += 1) players.a.move(step);
+        feedback(`当前方块被错位 ${Math.abs(event.effect.offset)} 格`, 'warn');
+        network.state(stateOf(players.a));
+      }
+      if (event.effect?.targetId === selfId && event.effect?.gravity) {
+        players.a.gravity = true;
+        feedback('重力加速已生效', 'warn');
+      }
       if (event.effect?.targetId === selfId && event.effect?.forceDrop) {
         players.a.hardDrop();
         paint('a');
@@ -384,7 +420,24 @@ const network = new MatchClient({
       if (event.effect?.targetId === selfId && Array.isArray(event.effect?.board)) {
         players.a.board = event.effect.board.map(row => row.slice());
         paint('a');
+        network.state(stateOf(players.a));
       }
+      if (event.effect?.targetId === selfId && event.effect?.reroll && event.effect?.current) {
+        applyCurrentSnapshot(players.a, event.effect.current);
+        paint('a');
+        network.state(stateOf(players.a));
+      }
+      if (event.playerId === selfId && event.effect?.hardDropUnlocked) {
+        players.a.hardDropUnlocked = true;
+        feedback('硬降已永久解锁（本局）', 'success');
+      }
+      if (event.playerId === selfId && event.effect?.frenzyDurationMs) {
+        players.a.frenzyUntil = Date.now() + event.effect.frenzyDurationMs;
+        feedback('狂热开启：清行额外获得能量', 'success');
+      }
+      if (event.effect?.drained > 0) feedback(event.playerId === selfId ? `吸取 ${event.effect.drained} 点能量` : `被吸取 ${event.effect.drained} 点能量`, event.playerId === selfId ? 'success' : 'warn');
+      if (event.effect?.copiedSkill) feedback(`复制并发动：${skillCatalog[event.effect.copiedSkill]?.[0] || event.effect.copiedSkill}`, 'success');
+      if (event.effect?.gambler && Array.isArray(event.effect.hand)) feedback('赌徒生成了一张品质卡', 'success');
       if (event.playerId === selfId && event.effect?.copyArmed) {
         players.a.copyExpiresAt = Date.now() + (event.effect.copyDurationMs || 5000);
         renderSkillHand('a');
@@ -408,7 +461,7 @@ const network = new MatchClient({
       else if (event.effect?.blocked) log('防御技能抵挡了这次攻击');
     }
     if (event.type === 'command' && event.payload?.type === 'skill') {
-      animateSkill(event.payload.skill, event.playerId, event.effect);
+      animateSkill(event.effect?.executedSkill || event.payload.skill, event.playerId, event.effect);
     }
     if (event.type === 'error') { log(`技能/网络错误: ${event.code}`); feedback(`房间操作失败：${event.code}`, 'error'); }
     if (event.disconnectedId && event.disconnectedId !== selfId) { log('对手已离线'); showRoomToast('对手已离开房间'); setRoomView('waiting'); }
@@ -464,15 +517,22 @@ function paint(key) {
       if (value && y >= 0 && cells[y] && x >= 0 && x < cells[y].length) cells[y][x] = player.current.color;
     }));
   }
-  document.querySelector('#board-' + key).innerHTML = cells.flat().map(value => `<div class="cell ${value ? 'filled ' + (value === 8 ? 'garbage' : value) : ''}"></div>`).join('');
+  document.querySelector('#board-' + key).innerHTML = cells.flat().map((value, index) => `<div class="cell ${value ? 'filled ' + (value === 8 ? 'garbage' : value) : ''}${index % 10 === player.blockedColumn ? ' forbidden' : ''}"></div>`).join('');
   document.querySelector('#score-' + key).textContent = `${player.score} pts`;
   document.querySelector('#energy-' + key).textContent = `${player.energy} / 100`;
   document.querySelector('#fill-' + key).style.width = `${player.energy}%`;
   document.querySelectorAll(`.skill[data-player="${key}"]`).forEach(button => {
-    const cost = button.dataset.restore === 'true' ? 0 : (skillCosts[button.dataset.skill] || 10);
-    button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || !player.alive;
+    const cost = button.dataset.restore === 'true' ? 0 : cardCost(button.dataset.card || button.dataset.skill);
+    const alreadyUnlocked = button.dataset.skill === 'unlockHardDrop' && player.hardDropUnlocked;
+    button.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || !player.alive || alreadyUnlocked;
     button.classList.toggle('insufficient', player.energy < cost);
   });
+  const hardButton = document.querySelector(`.controls[data-player="${key}"] [data-action="hard"]`);
+  if (hardButton) {
+    hardButton.textContent = player.hardDropUnlocked ? '硬降' : '硬降锁定';
+    hardButton.disabled = (online && (key === 'b' || !matchStarted || matchEnded)) || !player.alive;
+    hardButton.classList.toggle('locked', !player.hardDropUnlocked);
+  }
   const draw = document.querySelector(`.draw-skill[data-player="${key}"]`);
   if (draw) {
     const occupied = (player.skills || []).length + (player.copyExpiresAt > Date.now() ? 1 : 0);
@@ -495,6 +555,7 @@ function act(key, action) {
   if (online && matchEnded) return;
   const player = players[key];
   if (!player.alive) return;
+  if (action === 'hard' && !player.hardDropUnlocked) { feedback('需要 80 能量解锁硬降', 'warn'); return; }
   const reverse = player.reversed === true;
   if (action === 'left') player.move(reverse ? 1 : -1);
   if (action === 'right') player.move(reverse ? -1 : 1);
@@ -547,23 +608,27 @@ function useSkill(button) {
   if (online && (roomStatus !== 'playing' || matchEnded)) return;
   const player = players[key];
   const skill = button.dataset.skill;
+  const card = button.dataset.card || skill;
   const restoringCopy = skill === 'copyBoard' && button.dataset.restore === 'true' && player.copyExpiresAt > Date.now();
-  const cost = restoringCopy ? 0 : (skillCosts[skill] || 10);
-  if (skill !== 'cleanse' && !restoringCopy && !(player.skills || []).includes(skill)) return;
+  const cost = restoringCopy ? 0 : cardCost(card);
+  const fixedSkill = skill === 'cleanse' || skill === 'unlockHardDrop';
+  if (!fixedSkill && !restoringCopy && !(player.skills || []).includes(card)) return;
+  if (skill === 'unlockHardDrop' && player.hardDropUnlocked) { feedback('本局已经解锁硬降', 'warn'); return; }
   if (player.energy < cost) { feedback(`能量不足：${player.energy} / ${cost}`, 'error'); return; }
   button.classList.remove('action-success'); void button.offsetWidth; button.classList.add('action-success');
   if (online) {
     network.state(stateOf(player));
-    network.command({ type: 'skill', skill });
+    network.command({ type: 'skill', skill, card });
     skillSyncPauseUntil = performance.now() + 500;
     return;
   }
   player.energy -= cost;
-  if (skill !== 'cleanse' && !restoringCopy) {
-    const index = player.skills.indexOf(skill);
+  if (!fixedSkill && !restoringCopy) {
+    const index = player.skills.indexOf(card);
     if (index >= 0) player.skills.splice(index, 1);
   }
   if (skill === 'cleanse') { player.jammed = false; player.reversed = false; }
+  if (skill === 'unlockHardDrop') player.hardDropUnlocked = true;
   if (skill === 'reflect') player.reflect = true;
   if (skill === 'store') { player.held = player.current; player.spawn(); }
   if (skill === 'predict') { player.predictUntil = Date.now() + 8000; renderPrediction(key); }
@@ -665,6 +730,7 @@ function reshapeBottom(board, depth = 4) {
 function stateOf(player) {
   return {
     score: player.score, energy: player.energy, ackSeq: lastAckSeq, alive: player.alive, jammed: player.jammed === true, reversed: player.reversed === true, skills: player.skills || [], board: player.board,
+    blockedColumn: player.blockedColumn, gravity: player.gravity === true, hardDropUnlocked: player.hardDropUnlocked === true,
     current: { cells: player.current.cells, x: player.x, y: player.y, color: player.current.color }
   };
 }
@@ -678,6 +744,7 @@ function loop(now) {
     if (online && !matchStarted) return;
     const player = players[key];
     if (!player.alive) return;
+    player.dropInterval = player.gravity ? 250 : player.frenzyUntil > Date.now() ? 540 : 760;
     if (advancePlayer(player, delta, 2) > 0) paint(key);
   });
   if (online && matchStarted && players.b.alive && Date.now() - (players.b.lastSnapshotAt || 0) > 350) {

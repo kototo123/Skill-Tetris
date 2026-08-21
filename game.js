@@ -59,6 +59,12 @@
 
   function canUseSkill(energy, cost) { return energy >= cost; }
 
+  function collidesForPlayer(player, piece, x, y) {
+    if (collides(player.board, piece, x, y)) return true;
+    if (!Number.isInteger(player.blockedColumn)) return false;
+    return piece.some(row => row.some((cell, dx) => cell && x + dx === player.blockedColumn));
+  }
+
   function randomShape() {
     const shape = SHAPES[Math.floor(Math.random() * SHAPES.length)];
     return { ...shape, cells: shape.cells.map(row => row.slice()) };
@@ -80,6 +86,10 @@
       this.alive = true;
       this.shield = false;
       this.jammed = false;
+      this.blockedColumn = null;
+      this.gravity = false;
+      this.frenzyUntil = 0;
+      this.hardDropUnlocked = false;
       this.dropInterval = 760;
       this.lastDrop = 0;
     }
@@ -93,18 +103,18 @@
       if (collides(this.board, this.current.cells, this.x, this.y)) this.alive = false;
     }
 
-    move(dx) { if (!collides(this.board, this.current.cells, this.x + dx, this.y)) this.x += dx; }
+    move(dx) { if (!collidesForPlayer(this, this.current.cells, this.x + dx, this.y)) this.x += dx; }
     rotate() {
       if (this.jammed) return;
       const next = rotate(this.current.cells);
-      if (!collides(this.board, next, this.x, this.y)) this.current.cells = next;
+      if (!collidesForPlayer(this, next, this.x, this.y)) this.current.cells = next;
     }
     rotateReverse() {
       if (this.jammed) return;
       const next = rotateCounterClockwise(this.current.cells);
-      if (!collides(this.board, next, this.x, this.y)) this.current.cells = next;
+      if (!collidesForPlayer(this, next, this.x, this.y)) this.current.cells = next;
     }
-    softDrop() { if (!collides(this.board, this.current.cells, this.x, this.y + 1)) { this.y += 1; return true; } return false; }
+    softDrop() { if (!collidesForPlayer(this, this.current.cells, this.x, this.y + 1)) { this.y += 1; return true; } return false; }
     hardDrop() { while (this.softDrop()) this.score += 2; this.lock(); }
     lock() {
       this.board = mergePiece(this.board, this.current.cells, this.x, this.y, this.current.color);
@@ -114,7 +124,10 @@
         this.combo += 1;
         this.score += [0, 100, 250, 500, 900][result.lines] || 1200;
         this.energy = Math.min(100, this.energy + result.lines * 18 + this.combo * 4);
+        if (this.frenzyUntil > Date.now()) this.energy = Math.min(100, this.energy + result.lines * 12);
       } else this.combo = 0;
+      this.blockedColumn = null;
+      this.gravity = false;
       this.spawn();
       this.jammed = false;
       this.reversed = false;

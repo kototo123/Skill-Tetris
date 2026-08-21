@@ -1,17 +1,38 @@
 const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
+const { SHAPES } = require('./game.js');
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const SKILL_CARDS = ['jam', 'reverse', 'swapShape', 'slam', 'reshape', 'store', 'predict', 'reflect', 'clearTop', 'copyBoard'];
-const SKILL_COSTS = { jam: 10, reverse: 10, swapShape: 25, slam: 35, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35 };
+const SKILL_CARDS = ['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'cardSwap', 'reshape', 'store', 'predict', 'reflect', 'clearTop', 'copyBoard', 'drain', 'reroll', 'copy', 'gambler', 'frenzy'];
+const SKILL_COSTS = { jam: 10, reverse: 10, swapShape: 25, slam: 35, zone: 20, intercept: 25, offset: 25, mirrorBoard: 50, gravity: 25, cardSwap: 30, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35, drain: 15, reroll: 15, copy: 20, gambler: 10, frenzy: 20 };
+const COPY_EXCLUDED = new Set(['cleanse', 'unlockHardDrop', 'copy', 'gambler']);
+
+function baseSkill(card) { return String(card || '').split('@')[0]; }
+
+function skillCost(card) {
+  const [skill, modifier] = String(card || '').split('@');
+  const base = SKILL_COSTS[skill];
+  if (!base) return 0;
+  if (modifier === 'discount') return Math.max(5, base - 5);
+  if (modifier === 'overload') return base + 10;
+  return base;
+}
+
+function gamblerCard() {
+  const pool = SKILL_CARDS.filter(skill => skill !== 'gambler');
+  const skill = pool[Math.floor(Math.random() * pool.length)];
+  const roll = Math.random();
+  const modifier = roll < 0.55 ? '' : roll < 0.75 ? 'discount' : roll < 0.9 ? 'overload' : roll < 0.98 ? 'weak' : 'gold';
+  return modifier ? `${skill}@${modifier}` : skill;
+}
 
 function randomCards(count = 3) {
   return Array.from({ length: count }, () => SKILL_CARDS[Math.floor(Math.random() * SKILL_CARDS.length)]);
 }
 
 function initialState(stateSeq = 0) {
-  return { score: 0, energy: 50, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null };
+  return { score: 0, energy: 50, stateSeq, alive: true, board: null, current: null, skills: [], held: null, predictUntil: 0, reflect: false, copyBoard: null, hardDropUnlocked: false, blockedColumn: null, gravity: false, frenzyUntil: 0, lastSkill: null };
 }
 
 function cloneValue(value) {
@@ -43,7 +64,7 @@ function reshapeBottom(board, depth = 4) {
 
 function consumeOne(cards, skill) {
   const next = [...cards];
-  const index = next.indexOf(skill);
+  const index = next.findIndex(card => card === skill || baseSkill(card) === skill);
   if (index >= 0) next.splice(index, 1);
   return next;
 }
@@ -127,6 +148,7 @@ class RoomManager {
     if (room.status !== 'playing') throw new Error('MATCH_NOT_PLAYING');
     if (!payload || !['move', 'rotate', 'softDrop', 'hardDrop', 'skill', 'drawSkill', 'reportOpponentLoss'].includes(payload.type)) throw new Error('INVALID_COMMAND');
     if (payload.type === 'move' && ![-1, 1].includes(payload.direction)) throw new Error('INVALID_DIRECTION');
+    if (payload.type === 'hardDrop' && !(room.states.get(playerId)?.hardDropUnlocked)) throw new Error('HARD_DROP_LOCKED');
     const command = { seq: room.seq + 1, playerId, payload, at: Date.now() };
     if (payload.type === 'reportOpponentLoss') {
       const opponentId = room.players.find(id => id !== playerId);
@@ -155,9 +177,14 @@ class RoomManager {
       command.effect = { cost: drawCost, energy: player.energy, skill: player.skills[player.skills.length - 1], hand: player.skills };
     }
     if (payload.type === 'skill') {
-      const fixedSkill = payload.skill === 'cleanse';
-      const skillCost = fixedSkill ? 30 : SKILL_COSTS[payload.skill];
       const attacker = room.states.get(playerId) || {};
+      const opponentId = room.players.find(id => id !== playerId);
+      const opponent = opponentId ? room.states.get(opponentId) : null;
+      const fixedSkill = ['cleanse', 'unlockHardDrop'].includes(payload.skill);
+      const ownedCard = fixedSkill ? payload.skill : (attacker.skills || []).find(card => {
+        if (payload.card) return card === payload.card && baseSkill(card) === payload.skill;
+        return baseSkill(card) === payload.skill;
+      });
       if (payload.skill === 'copyBoard' && attacker.copyBoard?.expiresAt > Date.now()) {
         attacker.board = cloneValue(attacker.copyBoard.board);
         attacker.current = cloneValue(attacker.copyBoard.current);
@@ -174,81 +201,144 @@ class RoomManager {
         return command;
       }
       if (payload.skill === 'copyBoard' && attacker.copyBoard) attacker.copyBoard = null;
-      if (!skillCost) throw new Error('INVALID_SKILL');
-      if ((attacker.energy || 0) < skillCost) throw new Error('INSUFFICIENT_ENERGY');
-      if (!fixedSkill && !(attacker.skills || []).includes(payload.skill)) throw new Error('SKILL_NOT_OWNED');
-      attacker.energy -= skillCost;
+      if (payload.skill === 'unlockHardDrop' && attacker.hardDropUnlocked) throw new Error('HARD_DROP_ALREADY_UNLOCKED');
+      if (!fixedSkill && !SKILL_COSTS[payload.skill]) throw new Error('INVALID_SKILL');
+      if (!fixedSkill && !ownedCard) throw new Error('SKILL_NOT_OWNED');
+      if (payload.skill === 'cardSwap' && ((attacker.skills || []).length < 2 || !(opponent?.skills || []).length)) throw new Error('CARD_SWAP_UNAVAILABLE');
+      let resolvedSkill = payload.skill;
+      if (payload.skill === 'copy') {
+        if (!opponent?.lastSkill || COPY_EXCLUDED.has(opponent.lastSkill)) throw new Error('NOTHING_TO_COPY');
+        resolvedSkill = opponent.lastSkill;
+      }
+      const modifier = String(ownedCard || '').split('@')[1] || '';
+      const weak = modifier === 'weak';
+      const gold = modifier === 'gold';
+      const cost = payload.skill === 'cleanse' ? 30 : payload.skill === 'unlockHardDrop' ? 80 : skillCost(ownedCard);
+      if (!cost) throw new Error('INVALID_SKILL');
+      if ((attacker.energy || 0) < cost) throw new Error('INSUFFICIENT_ENERGY');
+      attacker.energy -= cost;
       attacker.stateSeq = command.seq;
-      if (!fixedSkill) attacker.skills = consumeOne(attacker.skills, payload.skill);
-      if (payload.skill === 'reflect') attacker.reflect = true;
-      if (payload.skill === 'cleanse') {
+      if (!fixedSkill) attacker.skills = consumeOne(attacker.skills, ownedCard);
+      if (resolvedSkill === 'reflect') attacker.reflect = true;
+      if (resolvedSkill === 'cleanse') {
         attacker.jammed = false;
         attacker.reversed = false;
+        attacker.blockedColumn = null;
+        attacker.gravity = false;
       }
-      const opponentId = room.players.find(id => id !== playerId);
+      if (resolvedSkill === 'unlockHardDrop') attacker.hardDropUnlocked = true;
       let blocked = false;
       let reflected = false;
+      let drained = 0;
       let effectTargetId = playerId;
-      const attackSkill = ['jam', 'reverse', 'swapShape', 'slam'].includes(payload.skill);
+      const attackSkill = ['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'drain'].includes(resolvedSkill);
+      let target = attacker;
       if (opponentId && attackSkill) {
-        const opponent = room.states.get(opponentId) || {};
         if (opponent.reflect) {
           opponent.reflect = false;
           blocked = true;
           reflected = true;
           effectTargetId = playerId;
-          if (payload.skill === 'jam') attacker.jammed = true;
-          if (payload.skill === 'reverse') attacker.reversed = true;
-          if (payload.skill === 'slam') attacker.forceDrop = true;
-          if (payload.skill === 'swapShape') blocked = true;
-        } else if (payload.skill === 'jam') opponent.jammed = true;
-        else if (payload.skill === 'reverse') opponent.reversed = true;
-        else if (payload.skill === 'slam') opponent.forceDrop = true;
-        else if (payload.skill === 'swapShape') {
+          target = attacker;
+        } else {
+          effectTargetId = opponentId;
+          target = opponent;
+        }
+        if (resolvedSkill === 'jam') target.jammed = true;
+        else if (resolvedSkill === 'reverse') target.reversed = true;
+        else if (resolvedSkill === 'slam') target.forceDrop = true;
+        else if (resolvedSkill === 'zone') target.blockedColumn = Math.floor(Math.random() * 10);
+        else if (resolvedSkill === 'intercept') target.intercept = true;
+        else if (resolvedSkill === 'offset') target.offset = (Math.random() < 0.5 ? -1 : 1) * (weak ? 1 : gold ? 3 : 2);
+        else if (resolvedSkill === 'gravity') target.gravity = true;
+        else if (resolvedSkill === 'mirrorBoard' && Array.isArray(target.board)) {
+          const weakCopy = payload.skill === 'copy' && (SKILL_COSTS[resolvedSkill] || 0) >= 40;
+          const split = weakCopy ? Math.max(0, target.board.length - 10) : 0;
+          target.board = [...target.board.slice(0, split), ...target.board.slice(split).map(row => row.slice().reverse())];
+        } else if (resolvedSkill === 'drain') {
+          const receiver = target === attacker ? opponent : attacker;
+          drained = Math.min(weak ? 5 : gold ? 15 : 10, target.energy || 0);
+          target.energy = Math.max(0, (target.energy || 0) - drained);
+          receiver.energy = Math.min(100, (receiver.energy || 0) + drained);
+        } else if (resolvedSkill === 'swapShape') {
           const own = cloneValue(attacker.current);
           const other = cloneValue(opponent.current);
           attacker.current = fitPieceToBoard(attacker.board, other, own);
           opponent.current = fitPieceToBoard(opponent.board, own, other);
         }
-        if (!blocked) effectTargetId = opponentId;
         opponent.updatedAt = Date.now();
         opponent.stateSeq = command.seq;
         room.states.set(opponentId, opponent);
       }
-      if (payload.skill === 'reshape' && Array.isArray(attacker.board)) attacker.board = reshapeBottom(attacker.board);
-      if (payload.skill === 'store') attacker.store = true;
-      if (payload.skill === 'predict') attacker.predictUntil = Date.now() + 8000;
-      if (payload.skill === 'clearTop' && Array.isArray(attacker.board)) attacker.board = clearHighestOccupiedRow(attacker.board);
-      if (payload.skill === 'copyBoard') attacker.copyBoard = { board: cloneValue(attacker.board), current: cloneValue(attacker.current), expiresAt: Date.now() + 5000 };
-      const opponent = opponentId ? room.states.get(opponentId) : null;
+      if (resolvedSkill === 'cardSwap') {
+        const ownIndex = Math.floor(Math.random() * attacker.skills.length);
+        const otherIndex = Math.floor(Math.random() * opponent.skills.length);
+        [attacker.skills[ownIndex], opponent.skills[otherIndex]] = [opponent.skills[otherIndex], attacker.skills[ownIndex]];
+        opponent.updatedAt = Date.now();
+        room.states.set(opponentId, opponent);
+      }
+      if (resolvedSkill === 'reshape' && Array.isArray(attacker.board)) attacker.board = reshapeBottom(attacker.board);
+      if (resolvedSkill === 'store') attacker.store = true;
+      const predictDurationMs = weak ? 5000 : gold ? 12000 : 8000;
+      const frenzyDurationMs = weak ? 4000 : gold ? 9000 : 6000;
+      if (resolvedSkill === 'predict') attacker.predictUntil = Date.now() + predictDurationMs;
+      if (resolvedSkill === 'clearTop' && Array.isArray(attacker.board)) attacker.board = clearHighestOccupiedRow(attacker.board);
+      if (resolvedSkill === 'copyBoard') attacker.copyBoard = { board: cloneValue(attacker.board), current: cloneValue(attacker.current), expiresAt: Date.now() + 5000 };
+      if (resolvedSkill === 'reroll') {
+        const currentSignature = JSON.stringify(attacker.current?.cells || []);
+        const choices = SHAPES.filter(shape => JSON.stringify(shape.cells) !== currentSignature);
+        const shape = choices[Math.floor(Math.random() * choices.length)];
+        attacker.current = fitPieceToBoard(attacker.board, { cells: cloneValue(shape.cells), color: shape.color }, attacker.current);
+      }
+      if (resolvedSkill === 'gambler') attacker.skills.push(gamblerCard());
+      if (resolvedSkill === 'frenzy') attacker.frenzyUntil = Date.now() + frenzyDurationMs;
+      if (!COPY_EXCLUDED.has(resolvedSkill)) attacker.lastSkill = resolvedSkill;
       command.effect = {
         skill: payload.skill,
+        executedSkill: resolvedSkill,
+        copiedSkill: payload.skill === 'copy' ? resolvedSkill : undefined,
         targetId: attackSkill ? effectTargetId : playerId,
-        cost: skillCost,
+        cost,
         energy: attacker.energy,
         blocked,
         reflected,
-        jammed: payload.skill === 'jam' && (!blocked || reflected),
-        reversed: payload.skill === 'reverse' && (!blocked || reflected),
-        cleanse: payload.skill === 'cleanse' ? 2 : 0,
-        forceDrop: payload.skill === 'slam' && (!blocked || reflected),
-        swapShape: payload.skill === 'swapShape' && !blocked,
-        reshape: payload.skill === 'reshape',
-        store: payload.skill === 'store',
+        modifier,
+        weak,
+        gold,
+        jammed: resolvedSkill === 'jam',
+        reversed: resolvedSkill === 'reverse',
+        cleanse: resolvedSkill === 'cleanse' ? 2 : 0,
+        forceDrop: resolvedSkill === 'slam',
+        blockedColumn: resolvedSkill === 'zone' ? target.blockedColumn : undefined,
+        intercept: resolvedSkill === 'intercept',
+        offset: resolvedSkill === 'offset' ? target.offset : undefined,
+        gravity: resolvedSkill === 'gravity',
+        mirrorBoard: resolvedSkill === 'mirrorBoard',
+        drained,
+        cardSwap: resolvedSkill === 'cardSwap',
+        hardDropUnlocked: resolvedSkill === 'unlockHardDrop',
+        reroll: resolvedSkill === 'reroll',
+        gambler: resolvedSkill === 'gambler',
+        frenzyDurationMs: resolvedSkill === 'frenzy' ? frenzyDurationMs : 0,
+        swapShape: resolvedSkill === 'swapShape',
+        reshape: resolvedSkill === 'reshape',
+        store: resolvedSkill === 'store',
         predictUntil: attacker.predictUntil || 0,
-        predictDurationMs: payload.skill === 'predict' ? 8000 : 0,
-        reflect: payload.skill === 'reflect',
-        clearTop: payload.skill === 'clearTop',
-        copyArmed: payload.skill === 'copyBoard',
+        predictDurationMs: resolvedSkill === 'predict' ? predictDurationMs : 0,
+        reflect: resolvedSkill === 'reflect',
+        clearTop: resolvedSkill === 'clearTop',
+        copyArmed: resolvedSkill === 'copyBoard',
         copyExpiresAt: attacker.copyBoard?.expiresAt || 0,
-        copyDurationMs: payload.skill === 'copyBoard' ? 5000 : 0,
-        board: ['reshape', 'clearTop'].includes(payload.skill) ? cloneValue(attacker.board) : undefined,
-        current: payload.skill === 'store' ? cloneValue(attacker.current) : undefined,
-        players: payload.skill === 'swapShape' && !blocked ? {
+        copyDurationMs: resolvedSkill === 'copyBoard' ? 5000 : 0,
+        board: ['reshape', 'clearTop'].includes(resolvedSkill) ? cloneValue(attacker.board) : resolvedSkill === 'mirrorBoard' ? cloneValue(target.board) : undefined,
+        current: ['store', 'reroll'].includes(resolvedSkill) ? cloneValue(attacker.current) : undefined,
+        players: resolvedSkill === 'swapShape' ? {
           [playerId]: { current: cloneValue(attacker.current) },
           [opponentId]: { current: cloneValue(opponent?.current) }
         } : undefined,
-        hand: attacker.skills || []
+        hand: attacker.skills || [],
+        hands: resolvedSkill === 'cardSwap' ? { [playerId]: attacker.skills || [], [opponentId]: opponent.skills || [] } : undefined,
+        energies: resolvedSkill === 'drain' ? { [playerId]: attacker.energy, [opponentId]: opponent.energy } : undefined
       };
       attacker.updatedAt = Date.now();
       room.states.set(playerId, attacker);
@@ -284,6 +374,11 @@ class RoomManager {
       reflect: previous.reflect === true,
       jammed: acceptsState ? state?.jammed === true : previous.jammed === true,
       reversed: acceptsState ? state?.reversed === true : previous.reversed === true,
+      hardDropUnlocked: previous.hardDropUnlocked === true,
+      blockedColumn: acceptsState && (state?.blockedColumn == null || Number.isInteger(state.blockedColumn)) ? state.blockedColumn : previous.blockedColumn ?? null,
+      gravity: acceptsState ? state?.gravity === true : previous.gravity === true,
+      frenzyUntil: previous.frenzyUntil || 0,
+      lastSkill: previous.lastSkill || null,
       skills: Array.isArray(previous.skills) ? previous.skills : [],
       held: previous.held || null,
       predictUntil: previous.predictUntil || 0,
@@ -318,6 +413,7 @@ class RoomManager {
         const state = cloneValue(raw);
         state.copyRemainingMs = Math.max(0, (raw.copyBoard?.expiresAt || 0) - Date.now());
         state.predictRemainingMs = Math.max(0, (raw.predictUntil || 0) - Date.now());
+        state.frenzyRemainingMs = Math.max(0, (raw.frenzyUntil || 0) - Date.now());
         state.copyBoard = state.copyRemainingMs > 0 ? { active: true } : null;
         if (viewerId && viewerId !== playerId) {
           state.skills = (raw.skills || []).map(() => null);
@@ -375,11 +471,13 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
           room.clients.forEach((client, clientId) => {
             if (client.readyState !== 1) return;
             let effect = command?.effect;
-            if (effect && clientId !== playerId) {
-              const { hand, energy, ...publicEffect } = effect;
-              effect = message.payload?.type === 'drawSkill'
+            if (effect) {
+              const privateHand = effect.hands?.[clientId] || (clientId === playerId ? effect.hand : undefined);
+              const privateEnergy = effect.energies?.[clientId] ?? (clientId === playerId ? effect.energy : undefined);
+              const { hand, hands, energy, energies, ...publicEffect } = effect;
+              effect = message.payload?.type === 'drawSkill' && clientId !== playerId
                 ? { cost: publicEffect.cost, drewSkill: true }
-                : publicEffect;
+                : { ...publicEffect, hand: privateHand, energy: privateEnergy };
             }
             client.send(JSON.stringify({ ...event, room: manager.snapshot(room.code, clientId), effect, selfId: clientId }));
           });

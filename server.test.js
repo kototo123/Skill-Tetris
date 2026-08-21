@@ -81,6 +81,20 @@ test('attack cards cannot be forged when they are not in the server hand', () =>
   assert.equal(room.states.get('host').energy, 100);
 });
 
+test('an owned cheap card cannot be relabeled as a different expensive skill', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 100, skills: ['jam'] });
+  room.states.get('guest').energy = 40;
+  assert.throws(
+    () => manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'drain', card: 'jam' }),
+    /SKILL_NOT_OWNED/
+  );
+  assert.equal(room.states.get('guest').energy, 40);
+});
+
 test('removed shield commands cannot be forged after the skill leaves the card pool', () => {
   const manager = new RoomManager();
   const room = manager.createRoom('host');
@@ -264,6 +278,7 @@ test('rejects malformed commands and exposes authoritative snapshots', () => {
   manager.joinRoom(room.code, 'p2');
   room.status = 'playing';
   assert.throws(() => manager.recordCommand(room.code, 'p1', { type: 'move', direction: 0 }), /INVALID_DIRECTION/);
+  room.states.get('p1').hardDropUnlocked = true;
   manager.recordCommand(room.code, 'p1', { type: 'hardDrop' });
   const snapshot = manager.updateState(room.code, 'p1', { score: 1000, energy: 150, alive: true, board: [[1]] });
   assert.equal(snapshot.seq, 1);
@@ -684,6 +699,123 @@ test('using another defensive card does not secretly cleanse debuffs or cancel r
   assert.equal(room.states.get('host').jammed, true);
   assert.equal(room.states.get('host').reversed, true);
   assert.equal(room.states.get('host').reflect, true);
+});
+
+test('hard drop stays locked until the fixed eighty-energy unlock is purchased', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  room.states.get('host').energy = 100;
+  assert.throws(() => manager.recordCommand(room.code, 'host', { type: 'hardDrop' }), /HARD_DROP_LOCKED/);
+  const unlock = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'unlockHardDrop' });
+  assert.equal(unlock.effect.hardDropUnlocked, true);
+  assert.equal(room.states.get('host').energy, 20);
+  assert.doesNotThrow(() => manager.recordCommand(room.code, 'host', { type: 'hardDrop' }));
+});
+
+test('new disruption attacks expose authoritative effects', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  const host = room.states.get('host');
+  const guest = room.states.get('guest');
+  host.energy = 100;
+  host.skills = ['zone', 'intercept', 'offset', 'gravity'];
+
+  const zone = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'zone' });
+  assert.equal(Number.isInteger(zone.effect.blockedColumn), true);
+  assert.equal(guest.blockedColumn, zone.effect.blockedColumn);
+  const intercept = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'intercept' });
+  assert.equal(intercept.effect.intercept, true);
+  const offset = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'offset' });
+  assert.equal(Math.abs(offset.effect.offset), 2);
+  const gravity = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'gravity' });
+  assert.equal(gravity.effect.gravity, true);
+  assert.equal(guest.gravity, true);
+});
+
+test('mirror reverses the target board and costs fifty energy', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 50, skills: ['mirrorBoard'] });
+  room.states.get('guest').board = [[1, 0, 2]];
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'mirrorBoard' });
+  assert.deepEqual(room.states.get('guest').board, [[2, 0, 1]]);
+  assert.equal(command.effect.cost, 50);
+});
+
+test('card swap exchanges one remaining owned card with one opponent card', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 30, skills: ['cardSwap', 'jam'] });
+  room.states.get('guest').skills = ['predict'];
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'cardSwap' });
+  assert.deepEqual(room.states.get('host').skills, ['predict']);
+  assert.deepEqual(room.states.get('guest').skills, ['jam']);
+  assert.equal(command.effect.cardSwap, true);
+});
+
+test('drain transfers ten energy and reroll replaces the current shape', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 30, skills: ['drain', 'reroll'], current: { cells: [[1]], x: 3, y: 2, color: 'red' } });
+  room.states.get('guest').energy = 40;
+  const drain = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'drain' });
+  assert.equal(drain.effect.drained, 10);
+  assert.equal(room.states.get('host').energy, 25);
+  assert.equal(room.states.get('guest').energy, 30);
+  const before = JSON.stringify(room.states.get('host').current.cells);
+  const reroll = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'reroll' });
+  assert.equal(reroll.effect.reroll, true);
+  assert.notEqual(JSON.stringify(room.states.get('host').current.cells), before);
+});
+
+test('copy repeats the opponents latest eligible skill and gambler creates a tagged card', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('guest'), { energy: 10, skills: ['jam'] });
+  manager.recordCommand(room.code, 'guest', { type: 'skill', skill: 'jam' });
+  Object.assign(room.states.get('host'), { energy: 30, skills: ['copy', 'gambler'] });
+  const copied = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'copy' });
+  assert.equal(copied.effect.copiedSkill, 'jam');
+  assert.equal(room.states.get('guest').jammed, true);
+  const gamble = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'gambler' });
+  assert.equal(gamble.effect.gambler, true);
+  assert.equal(room.states.get('host').skills.length, 1);
+  assert.match(room.states.get('host').skills[0], /^[a-zA-Z]+(?:@(discount|overload|weak|gold))?$/);
+});
+
+test('frenzy starts a six-second reward window', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 20, skills: ['frenzy'] });
+  const before = Date.now();
+  const command = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'frenzy' });
+  assert.equal(command.effect.frenzyDurationMs, 6000);
+  assert.equal(room.states.get('host').frenzyUntil >= before + 5900, true);
+});
+
+test('weak and gold gambler cards change effect strength as shown on the card', () => {
+  const manager = new RoomManager();
+  const room = manager.createRoom('host');
+  manager.joinRoom(room.code, 'guest');
+  room.status = 'playing';
+  Object.assign(room.states.get('host'), { energy: 100, skills: ['drain@weak', 'offset@gold'] });
+  room.states.get('guest').energy = 40;
+  const drain = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'drain', card: 'drain@weak' });
+  assert.equal(drain.effect.drained, 5);
+  const offset = manager.recordCommand(room.code, 'host', { type: 'skill', skill: 'offset', card: 'offset@gold' });
+  assert.equal(Math.abs(offset.effect.offset), 3);
 });
 
 

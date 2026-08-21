@@ -49,3 +49,38 @@ test('keeps a three-piece preview queue and advances it on spawn', () => {
   assert.equal(player.current.name, expected);
   assert.equal(player.nextQueue.length, 3);
 });
+
+test('a blocked column prevents the active piece from entering it', () => {
+  const player = new Player('test', 'cyan');
+  player.current = { name: 'O', color: 'yellow', cells: [[1, 1], [1, 1]] };
+  player.x = 3;
+  player.y = 0;
+  player.blockedColumn = 2;
+  player.move(-1);
+  assert.equal(player.x, 3);
+});
+
+test('piece-scoped disruption clears after the piece locks', () => {
+  const player = new Player('test', 'cyan');
+  player.current = { name: 'O', color: 'yellow', cells: [[1, 1], [1, 1]] };
+  player.x = 4;
+  player.y = 18;
+  player.blockedColumn = 2;
+  player.gravity = true;
+  player.lock();
+  assert.equal(player.blockedColumn, null);
+  assert.equal(player.gravity, false);
+});
+
+test('frenzy adds twelve energy per cleared line', () => {
+  const player = new Player('test', 'cyan');
+  player.board[19] = Array(10).fill(1);
+  player.board[19][4] = 0;
+  player.current = { name: 'dot', color: 'cyan', cells: [[1]] };
+  player.x = 4;
+  player.y = 19;
+  player.energy = 0;
+  player.frenzyUntil = Date.now() + 1000;
+  player.lock();
+  assert.equal(player.energy, 34);
+});
