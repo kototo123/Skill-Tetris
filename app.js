@@ -533,6 +533,12 @@ function leaveRoomOnPageExit() {
 window.addEventListener('pagehide', leaveRoomOnPageExit);
 window.addEventListener('beforeunload', leaveRoomOnPageExit);
 
+document.addEventListener('gesturestart', event => event.preventDefault());
+document.addEventListener('dblclick', event => event.preventDefault());
+document.addEventListener('touchmove', event => {
+  if (event.touches && event.touches.length > 1) event.preventDefault();
+}, { passive: false });
+
 function paint(key) {
   const player = players[key];
   const cells = player.board.map(row => row.slice());
