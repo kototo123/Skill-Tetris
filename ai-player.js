@@ -71,14 +71,45 @@ function chooseBestPlacement(player, random = Math.random) {
   return best;
 }
 
-function playBestMove(player, random = Math.random) {
+// Returns the rotation index (0..3) of `cells` within the rotation set of `current.cells`.
+function rotationIndexOf(currentCells, targetCells) {
+  const rotations = rotationsOf(currentCells, false);
+  const targetSig = JSON.stringify(targetCells);
+  return rotations.findIndex(item => JSON.stringify(item) === targetSig);
+}
+
+// Performs one step toward the optimal placement.
+function aiStep(player, random = Math.random) {
+  if (!player?.alive || !player.current?.cells || !Array.isArray(player.board?.[0])) return { action: 'dead' };
   const placement = chooseBestPlacement(player, random);
-  if (!placement) { player.alive = false; return null; }
-  player.current.cells = cloneMatrix(placement.cells);
-  player.x = placement.x;
-  player.y = placement.y;
+  if (!placement) { player.alive = false; return { action: 'dead' }; }
+  const rotIdx = rotationIndexOf(player.current.cells, placement.cells);
+  const needsRotate = rotIdx > 0;
+  const needsMove = player.x !== placement.x;
+  const reversed = player.reversed === true;
+  if (needsRotate && !player.jammed) {
+    if (reversed) player.rotateReverse();
+    else player.rotate();
+    return { action: 'rotate' };
+  }
+  if (needsMove) {
+    const dx = placement.x > player.x ? 1 : -1;
+    player.move(reversed ? -dx : dx);
+    return { action: 'move' };
+  }
+  if (player.softDrop()) return { action: 'drop' };
   player.lock();
-  return placement;
+  return { action: 'lock' };
+}
+
+// Legacy: used by tests that need a complete placement in one call.
+function playBestMove(player, random = Math.random) {
+  while (player.alive && player.current?.cells) {
+    const result = aiStep(player, random);
+    if (!result || result.action === 'dead') { player.alive = false; return null; }
+    if (result.action === 'lock') return { x: player.x, y: player.y };
+  }
+  return null;
 }
 
 function stateFromPlayer(player, stateSeq = 0) {
@@ -97,7 +128,7 @@ function stateFromPlayer(player, stateSeq = 0) {
     blockedUntil: player.blockedUntil || 0,
     gravity: player.gravity === true,
     frenzyUntil: player.frenzyUntil || 0,
-    hardDropUnlocked: true,
+    hardDropUnlocked: player.hardDropUnlocked === true,
     predictUntil: 0,
     copyBoard: null,
     held: player.held || null,
@@ -130,8 +161,8 @@ function applyStateToPlayer(player, state) {
 function createAiPlayer() {
   const player = new Player('KTOTO AI', 'pink');
   player.skills = [];
-  player.hardDropUnlocked = true;
+  player.hardDropUnlocked = false;
   return player;
 }
 
-module.exports = { chooseBestPlacement, playBestMove, stateFromPlayer, applyStateToPlayer, createAiPlayer, boardMetrics };
+module.exports = { chooseBestPlacement, playBestMove, aiStep, stateFromPlayer, applyStateToPlayer, createAiPlayer, boardMetrics };

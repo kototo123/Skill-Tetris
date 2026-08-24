@@ -2,7 +2,7 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { SHAPES } = require('./game.js');
-const { createAiPlayer, playBestMove, stateFromPlayer, applyStateToPlayer } = require('./ai-player.js');
+const { createAiPlayer, playBestMove, aiStep, stateFromPlayer, applyStateToPlayer } = require('./ai-player.js');
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SKILL_CARDS = ['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'cardSwap', 'reshape', 'store', 'predict', 'reflect', 'clearTop', 'copyBoard', 'drain', 'reroll', 'copy', 'gambler', 'frenzy'];
@@ -170,14 +170,14 @@ class RoomManager {
 
   tickAiRoom(code, random = Math.random) {
     const room = this.getRoom(code);
-    if (!room.isAi || room.status !== 'playing') return { placement: null, commands: [] };
+    if (!room.isAi || room.status !== 'playing') return { result: null, commands: [] };
     const humanId = room.players.find(id => id !== room.botId);
     const human = room.states.get(humanId);
     if (!human || human.alive === false) {
       room.status = 'finished';
       room.winnerId = room.botId;
       room.ready.clear();
-      return { placement: null, commands: [] };
+      return { result: null, commands: [] };
     }
 
     const botState = room.states.get(room.botId) || initialState(room.seq);
@@ -186,7 +186,7 @@ class RoomManager {
       room.aiPlayer.spawn();
       room.aiPlayer.intercept = false;
     }
-    const placement = playBestMove(room.aiPlayer, random);
+    const result = aiStep(room.aiPlayer, random);
     room.aiPlayer.forceDrop = false;
     room.aiPlayer.offset = 0;
     room.aiTickCount = (room.aiTickCount || 0) + 1;
@@ -213,7 +213,7 @@ class RoomManager {
       room.winnerId = humanId;
       room.ready.clear();
     }
-    return { placement, commands };
+    return { result, commands };
   }
 
   removePlayer(code, playerId) {
@@ -599,7 +599,7 @@ function createServer({ port = 4174, manager = new RoomManager() } = {}) {
         result.commands.forEach(command => broadcast(targetRoom, 'command', command.playerId, command.payload, command));
         broadcast(targetRoom, 'snapshot', targetRoom.botId);
         if (targetRoom.status === 'finished') { stopAi(targetRoom); broadcast(targetRoom, 'room', targetRoom.botId); }
-      }, 1100);
+      }, 80);
       targetRoom.aiTimer.unref?.();
     };
     const scheduleStart = targetRoom => {

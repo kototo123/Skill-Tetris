@@ -48,12 +48,19 @@ test('an AI tick places a piece and casts owned skills through normal command ru
   bot.skills = ['jam'];
   bot.energy = 50;
 
-  const result = manager.tickAiRoom(room.code, () => 0);
+  let result = null;
+  const allCommands = [];
+  for (let step = 0; step < 120; step += 1) {
+    result = manager.tickAiRoom(room.code, () => 0);
+    allCommands.push(...result.commands);
+    if (room.states.get(room.botId).board.flat().some(Boolean)
+      && room.states.get(room.botId).energy < 50) break;
+  }
 
-  assert.equal(result.placement !== null, true);
+  assert.equal(result.result !== null, true);
   assert.equal(room.states.get(room.botId).board.flat().some(Boolean), true);
-  assert.equal(result.commands.some(command => command.effect?.jammed), true);
-  assert.equal(room.states.get(room.botId).energy, 40);
+  assert.equal(allCommands.some(command => command.effect?.jammed), true);
+  assert.equal(room.states.get(room.botId).energy < 50, true);
   assert.equal(room.states.get('human').jammed, true);
 });
 
