@@ -11,6 +11,18 @@ function baseSkill(card) { return String(card || '').split('@')[0]; }
 function cardCost(card) { const [skill, modifier] = String(card || '').split('@'); const cost = skillCosts[skill] || 0; return modifier === 'discount' ? Math.max(5, cost - 5) : modifier === 'overload' ? cost + 10 : cost; }
 function cardLabel(card) { const modifier = String(card || '').split('@')[1]; return modifier === 'discount' ? '折扣' : modifier === 'overload' ? '过载' : modifier === 'weak' ? '残缺' : modifier === 'gold' ? '金色' : ''; }
 
+const blockEmoji = {
+  cyan: '🐟',
+  yellow: '⭐',
+  purple: '🍇',
+  orange: '🍊',
+  blue: '🐳',
+  green: '🍀',
+  red: '🍓',
+  pink: '🌸',
+  8: '🧱'
+};
+
 const players = { a: new Player('我', 'cyan'), b: new Player('对手', 'pink') };
 players.a.dropInterval = 760;
 players.b.dropInterval = 760;
@@ -549,7 +561,7 @@ function paint(key) {
       if (value && y >= 0 && cells[y] && x >= 0 && x < cells[y].length) cells[y][x] = player.current.color;
     }));
   }
-  document.querySelector('#board-' + key).innerHTML = cells.flat().map((value, index) => `<div class="cell ${value ? 'filled ' + (value === 8 ? 'garbage' : value) : ''}${index % 10 === player.blockedColumn ? ' forbidden' : ''}"></div>`).join('');
+  document.querySelector('#board-' + key).innerHTML = cells.flat().map((value, index) => `<div class="cell ${value ? 'filled ' + (value === 8 ? 'garbage' : value) : ''}${index % 10 === player.blockedColumn ? ' forbidden' : ''}">${value ? (blockEmoji[value] || '🍬') : ''}</div>`).join('');
   document.querySelector('#score-' + key).textContent = `${player.score} pts`;
   document.querySelector('#energy-' + key).textContent = `${player.energy} / 100`;
   document.querySelector('#fill-' + key).style.width = `${player.energy}%`;
