@@ -98,4 +98,24 @@ test('throttles soft drops instead of dropping every ai tick', () => {
   assert.equal(player.y, 6);
 });
 
+test('force drop and offset attacks affect the ai piece instead of being ignored', () => {
+  const forced = new Player('AI', 'pink');
+  forced.board = createBoard();
+  forced.current = { name: 'I', color: 'cyan', cells: [[1, 1, 1, 1]] };
+  forced.x = 3;
+  forced.y = 5;
+  forced.forceDrop = true;
+  assert.equal(aiStep(forced, () => 0.5, createAiContext()).action, 'forceDrop');
+  assert.equal(forced.board.flat().some(Boolean), true);
+
+  const shifted = new Player('AI', 'pink');
+  shifted.board = createBoard();
+  shifted.current = { name: 'I', color: 'cyan', cells: [[1, 1, 1, 1]] };
+  shifted.x = 2;
+  shifted.y = 5;
+  shifted.offset = 2;
+  assert.equal(aiStep(shifted, () => 0.5, createAiContext()).action, 'offset');
+  assert.equal(shifted.x, 4);
+});
+
 function cloneCells(cells) { return cells.map(row => row.slice()); }

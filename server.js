@@ -165,6 +165,8 @@ class RoomManager {
       room.aiPlayer = createAiPlayer();
       room.aiContext = createAiContext();
       room.aiTickCount = 0;
+      room.aiAttackCooldown = 0;
+      room.aiCleanseCooldown = 0;
       room.states.set(room.botId, stateFromPlayer(room.aiPlayer, room.seq));
     }
     room.commands = [];
@@ -213,9 +215,11 @@ class RoomManager {
       const danger = Array.isArray(state.board) && state.board.slice(0, 7).some(row => row.some(Boolean));
       const opponentDanger = Array.isArray(opponentState.board) && opponentState.board.slice(0, 7).some(row => row.some(Boolean));
       room.aiAttackCooldown = Math.max(0, (room.aiAttackCooldown || 0) - 1);
+      room.aiCleanseCooldown = Math.max(0, (room.aiCleanseCooldown || 0) - 1);
 
-      if (activeDebuff && energy >= 30) {
+      if (activeDebuff && energy >= 30 && room.aiCleanseCooldown === 0) {
         tryCommand({ type: 'skill', skill: 'cleanse' });
+        room.aiCleanseCooldown = 8;
       } else if (danger) {
         const defense = AI_DEFENSE_SKILLS.map(name => affordableCard(card => card === name)).find(Boolean);
         if (defense) tryCommand({ type: 'skill', skill: baseSkill(defense), card: defense });

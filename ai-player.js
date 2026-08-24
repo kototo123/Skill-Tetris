@@ -97,6 +97,23 @@ function ensureAiTarget(player, context, random) {
 // Performs one step toward the placement locked for this piece.
 function aiStep(player, random = Math.random, context = createAiContext()) {
   if (!player?.alive || !player.current?.cells || !Array.isArray(player.board?.[0])) return { action: 'dead' };
+  if (player.forceDrop) {
+    player.hardDrop();
+    player.forceDrop = false;
+    context.target = null;
+    context.targetFresh = false;
+    context.dropCooldown = 0;
+    return { action: 'forceDrop' };
+  }
+  if (Number.isFinite(player.offset) && player.offset !== 0) {
+    const step = Math.sign(player.offset);
+    const distance = Math.abs(player.offset);
+    for (let index = 0; index < distance; index += 1) player.move(step);
+    player.offset = 0;
+    context.target = null;
+    context.targetFresh = false;
+    return { action: 'offset' };
+  }
   const placement = ensureAiTarget(player, context, random);
   if (!placement) { player.alive = false; return { action: 'dead' }; }
   const rotIdx = rotationIndexOf(player.current.cells, placement.cells);
@@ -113,6 +130,7 @@ function aiStep(player, random = Math.random, context = createAiContext()) {
     player.move(reversed ? -dx : dx);
     return { action: 'move' };
   }
+  if (player.gravity) context.dropCooldown = Math.max(0, context.dropCooldown - 2);
   if (context.dropCooldown > 0) {
     context.dropCooldown -= 1;
     return { action: 'wait' };
