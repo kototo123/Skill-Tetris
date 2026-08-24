@@ -50,10 +50,10 @@ function placementScore(board, lines, random) {
     + (random() - 0.5) * 6;
 }
 
-function chooseBestPlacement(player, random = Math.random) {
+function choosePlacements(player, random = Math.random, limit = 8) {
   if (!player?.alive || !player.current?.cells || !Array.isArray(player.board?.[0])) return null;
   const width = player.board[0].length;
-  let best = null;
+  const placements = [];
   rotationsOf(player.current.cells, player.jammed === true).forEach(cells => {
     const pieceWidth = cells[0].length;
     for (let x = 0; x <= width - pieceWidth; x += 1) {
@@ -65,10 +65,16 @@ function chooseBestPlacement(player, random = Math.random) {
       const merged = mergePiece(player.board, cells, x, y, player.current.color);
       const result = clearLines(merged);
       const score = placementScore(result.board, result.lines, random);
-      if (!best || score > best.score) best = { cells: cloneMatrix(cells), x, y, score, lines: result.lines };
+      placements.push({ cells: cloneMatrix(cells), x, y, score, lines: result.lines });
     }
   });
-  return best;
+  placements.sort((a, b) => b.score - a.score);
+  return placements.slice(0, Math.max(1, limit));
+}
+
+function chooseBestPlacement(player, random = Math.random) {
+  const placements = choosePlacements(player, random, 1);
+  return placements?.[0] || null;
 }
 
 // Returns the rotation index (0..3) of `cells` within the rotation set of `current.cells`.
@@ -79,14 +85,21 @@ function rotationIndexOf(currentCells, targetCells) {
 }
 
 const AI_DROP_INTERVAL_TICKS = 5;
+const AI_REACTION_DELAY_TICKS = 7;
 
 function createAiContext() {
-  return { target: null, targetFresh: false, dropCooldown: 0 };
+  return { target: null, targetFresh: false, dropCooldown: 0, reactionCooldown: AI_REACTION_DELAY_TICKS };
 }
 
 function ensureAiTarget(player, context, random) {
   if (!context.targetFresh || !context.target) {
-    const placement = chooseBestPlacement(player, random);
+    let placement;
+    if (player.aiDisruptedUntil > Date.now()) {
+      const candidates = choosePlacements(player, random, 3) || [];
+      placement = candidates[Math.floor(random() * Math.min(candidates.length, 2))] || candidates[0];
+    } else {
+      placement = chooseBestPlacement(player, random);
+    }
     context.target = placement;
     context.targetFresh = true;
     if (!placement) player.alive = false;
@@ -97,12 +110,21 @@ function ensureAiTarget(player, context, random) {
 // Performs one step toward the placement locked for this piece.
 function aiStep(player, random = Math.random, context = createAiContext()) {
   if (!player?.alive || !player.current?.cells || !Array.isArray(player.board?.[0])) return { action: 'dead' };
+  if (context.pieceName && context.pieceName !== player.current.name) {
+    context.pieceName = player.current.name;
+    context.target = null;
+    context.targetFresh = false;
+    context.reactionCooldown = AI_REACTION_DELAY_TICKS;
+  } else if (!context.pieceName) {
+    context.pieceName = player.current.name;
+  }
   if (player.forceDrop) {
     player.hardDrop();
     player.forceDrop = false;
     context.target = null;
     context.targetFresh = false;
     context.dropCooldown = 0;
+    context.reactionCooldown = AI_REACTION_DELAY_TICKS;
     return { action: 'forceDrop' };
   }
   if (Number.isFinite(player.offset) && player.offset !== 0) {
@@ -112,7 +134,16 @@ function aiStep(player, random = Math.random, context = createAiContext()) {
     player.offset = 0;
     context.target = null;
     context.targetFresh = false;
+    context.reactionCooldown = AI_REACTION_DELAY_TICKS;
     return { action: 'offset' };
+  }
+  if (context.reactionCooldown > 0) {
+    if (player.y < 0 && !chooseBestPlacement(player, random)) {
+      player.alive = false;
+      return { action: 'dead' };
+    }
+    context.reactionCooldown -= 1;
+    return { action: 'wait' };
   }
   const placement = ensureAiTarget(player, context, random);
   if (!placement) { player.alive = false; return { action: 'dead' }; }
@@ -143,6 +174,7 @@ function aiStep(player, random = Math.random, context = createAiContext()) {
   context.target = null;
   context.targetFresh = false;
   context.dropCooldown = 0;
+  context.reactionCooldown = AI_REACTION_DELAY_TICKS;
   return { action: 'lock' };
 }
 
@@ -171,6 +203,7 @@ function stateFromPlayer(player, stateSeq = 0) {
     reflect: player.reflect === true,
     blockedColumn: Number.isInteger(player.blockedColumn) ? player.blockedColumn : null,
     blockedUntil: player.blockedUntil || 0,
+    aiDisruptedUntil: player.aiDisruptedUntil || 0,
     gravity: player.gravity === true,
     frenzyUntil: player.frenzyUntil || 0,
     hardDropUnlocked: player.hardDropUnlocked === true,
@@ -197,6 +230,7 @@ function applyStateToPlayer(player, state) {
   ['alive', 'jammed', 'reversed', 'reflect', 'gravity', 'forceDrop', 'intercept'].forEach(key => { if (typeof state[key] === 'boolean') player[key] = state[key]; });
   player.offset = Number.isFinite(state.offset) ? state.offset : 0;
   player.blockedColumn = Number.isInteger(state.blockedColumn) ? state.blockedColumn : null;
+  player.aiDisruptedUntil = Number.isFinite(state.aiDisruptedUntil) ? state.aiDisruptedUntil : 0;
   player.skills = [...(state.skills || [])];
   player.held = state.held || null;
   player.lastSkill = state.lastSkill || null;
@@ -207,15 +241,18 @@ function createAiPlayer() {
   const player = new Player('KTOTO AI', 'pink');
   player.skills = [];
   player.hardDropUnlocked = false;
+  player.aiDisruptedUntil = 0;
   return player;
 }
 
 module.exports = {
   chooseBestPlacement,
+  choosePlacements,
   playBestMove,
   aiStep,
   createAiContext,
   AI_DROP_INTERVAL_TICKS,
+  AI_REACTION_DELAY_TICKS,
   stateFromPlayer,
   applyStateToPlayer,
   createAiPlayer,

@@ -401,6 +401,7 @@ class RoomManager {
         }
         opponent.updatedAt = Date.now();
         opponent.stateSeq = command.seq;
+        if (room.isAi && effectTargetId === room.botId) opponent.aiDisruptedUntil = Date.now() + 1500;
         room.states.set(opponentId, opponent);
       }
       if (resolvedSkill === 'cardSwap') {

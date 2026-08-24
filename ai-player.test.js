@@ -60,6 +60,7 @@ test('locks the selected target column and stops horizontal movement once reache
   player.x = 0;
   player.y = 18;
   const context = createAiContext();
+  context.reactionCooldown = 0;
   context.target = { cells: cloneCells(player.current.cells), x: 6, y: 19 };
   context.targetFresh = true;
   context.dropCooldown = 99;
@@ -83,6 +84,7 @@ test('throttles soft drops instead of dropping every ai tick', () => {
   player.x = 3;
   player.y = 5;
   const context = createAiContext();
+  context.reactionCooldown = 0;
   context.target = { cells: cloneCells(player.current.cells), x: 3, y: 19 };
   context.targetFresh = true;
   context.dropCooldown = 2;
