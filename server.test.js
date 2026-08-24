@@ -47,10 +47,11 @@ test('an AI tick places a piece and casts owned skills through normal command ru
   const bot = room.states.get(room.botId);
   bot.skills = ['jam'];
   bot.energy = 50;
+  room.states.get('human').board = Array.from({ length: 20 }, (_, y) => Array(10).fill(y < 7 ? 'blue' : 0));
 
   let result = null;
   const allCommands = [];
-  for (let step = 0; step < 120; step += 1) {
+  for (let step = 0; step < 240; step += 1) {
     result = manager.tickAiRoom(room.code, () => 0);
     allCommands.push(...result.commands);
     if (room.states.get(room.botId).board.flat().some(Boolean)

@@ -2,12 +2,14 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const { SHAPES } = require('./game.js');
-const { createAiPlayer, playBestMove, aiStep, stateFromPlayer, applyStateToPlayer } = require('./ai-player.js');
+const { createAiPlayer, playBestMove, aiStep, createAiContext, stateFromPlayer, applyStateToPlayer } = require('./ai-player.js');
 
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const SKILL_CARDS = ['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'cardSwap', 'reshape', 'store', 'predict', 'reflect', 'clearTop', 'copyBoard', 'drain', 'reroll', 'copy', 'gambler', 'frenzy'];
 const SKILL_COSTS = { jam: 10, reverse: 10, swapShape: 25, slam: 35, zone: 20, intercept: 25, offset: 25, mirrorBoard: 50, gravity: 25, cardSwap: 30, reshape: 25, store: 15, predict: 15, reflect: 25, clearTop: 40, copyBoard: 35, drain: 15, reroll: 15, copy: 20, gambler: 10, frenzy: 20 };
 const COPY_EXCLUDED = new Set(['cleanse', 'unlockHardDrop', 'copy', 'gambler']);
+const AI_ATTACK_SKILLS = new Set(['jam', 'reverse', 'swapShape', 'slam', 'zone', 'intercept', 'offset', 'mirrorBoard', 'gravity', 'drain']);
+const AI_DEFENSE_SKILLS = ['clearTop', 'copyBoard', 'reflect', 'predict', 'store', 'reshape'];
 
 function baseSkill(card) { return String(card || '').split('@')[0]; }
 
@@ -161,6 +163,7 @@ class RoomManager {
     room.players.forEach(id => room.states.set(id, initialState(room.seq)));
     if (room.isAi) {
       room.aiPlayer = createAiPlayer();
+      room.aiContext = createAiContext();
       room.aiTickCount = 0;
       room.states.set(room.botId, stateFromPlayer(room.aiPlayer, room.seq));
     }
@@ -186,7 +189,7 @@ class RoomManager {
       room.aiPlayer.spawn();
       room.aiPlayer.intercept = false;
     }
-    const result = aiStep(room.aiPlayer, random);
+    const result = aiStep(room.aiPlayer, random, room.aiContext || (room.aiContext = createAiContext()));
     room.aiPlayer.forceDrop = false;
     room.aiPlayer.offset = 0;
     room.aiTickCount = (room.aiTickCount || 0) + 1;
@@ -197,15 +200,36 @@ class RoomManager {
     const tryCommand = payload => {
       try { commands.push(this.recordCommand(room.code, room.botId, payload)); } catch { /* An unavailable random card waits for a later tick. */ }
     };
-    if (room.aiPlayer.alive !== false && room.aiTickCount % 3 === 1) {
+    if (room.aiPlayer.alive !== false && room.aiTickCount % 6 === 0) {
       const state = currentBot();
-      const danger = state.board?.slice(0, 7).some(row => row.some(Boolean));
-      if (danger && (state.jammed || state.reversed || Number.isInteger(state.blockedColumn) || state.gravity) && state.energy >= 30) {
+      const opponentState = room.states.get(humanId) || {};
+      const energy = state.energy || 0;
+      const cards = state.skills || [];
+      const affordableCard = predicate => cards.find(card => {
+        const name = baseSkill(card);
+        return predicate(name) && skillCost(card) <= energy;
+      });
+      const activeDebuff = state.jammed || state.reversed || Number.isInteger(state.blockedColumn) || state.gravity;
+      const danger = Array.isArray(state.board) && state.board.slice(0, 7).some(row => row.some(Boolean));
+      const opponentDanger = Array.isArray(opponentState.board) && opponentState.board.slice(0, 7).some(row => row.some(Boolean));
+      room.aiAttackCooldown = Math.max(0, (room.aiAttackCooldown || 0) - 1);
+
+      if (activeDebuff && energy >= 30) {
         tryCommand({ type: 'skill', skill: 'cleanse' });
+      } else if (danger) {
+        const defense = AI_DEFENSE_SKILLS.map(name => affordableCard(card => card === name)).find(Boolean);
+        if (defense) tryCommand({ type: 'skill', skill: baseSkill(defense), card: defense });
+      } else if (opponentDanger && room.aiAttackCooldown === 0) {
+        const attack = cards.filter(card => AI_ATTACK_SKILLS.has(baseSkill(card)) && skillCost(card) <= energy)
+          .sort((a, b) => skillCost(b) - skillCost(a))[0];
+        if (attack) {
+          tryCommand({ type: 'skill', skill: baseSkill(attack), card: attack });
+          room.aiAttackCooldown = 4;
+        }
       }
-      const affordable = (currentBot().skills || []).find(card => skillCost(card) <= currentBot().energy);
-      if (affordable) tryCommand({ type: 'skill', skill: baseSkill(affordable), card: affordable });
-      else if ((currentBot().skills || []).length < 3 && currentBot().energy >= 10) tryCommand({ type: 'drawSkill' });
+      if (!commands.length && cards.length < 3 && energy >= 30) {
+        tryCommand({ type: 'drawSkill' });
+      }
     }
 
     if (room.aiPlayer.alive === false) {

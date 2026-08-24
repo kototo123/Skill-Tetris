@@ -78,10 +78,26 @@ function rotationIndexOf(currentCells, targetCells) {
   return rotations.findIndex(item => JSON.stringify(item) === targetSig);
 }
 
-// Performs one step toward the optimal placement.
-function aiStep(player, random = Math.random) {
+const AI_DROP_INTERVAL_TICKS = 5;
+
+function createAiContext() {
+  return { target: null, targetFresh: false, dropCooldown: 0 };
+}
+
+function ensureAiTarget(player, context, random) {
+  if (!context.targetFresh || !context.target) {
+    const placement = chooseBestPlacement(player, random);
+    context.target = placement;
+    context.targetFresh = true;
+    if (!placement) player.alive = false;
+  }
+  return context.target;
+}
+
+// Performs one step toward the placement locked for this piece.
+function aiStep(player, random = Math.random, context = createAiContext()) {
   if (!player?.alive || !player.current?.cells || !Array.isArray(player.board?.[0])) return { action: 'dead' };
-  const placement = chooseBestPlacement(player, random);
+  const placement = ensureAiTarget(player, context, random);
   if (!placement) { player.alive = false; return { action: 'dead' }; }
   const rotIdx = rotationIndexOf(player.current.cells, placement.cells);
   const needsRotate = rotIdx > 0;
@@ -97,15 +113,26 @@ function aiStep(player, random = Math.random) {
     player.move(reversed ? -dx : dx);
     return { action: 'move' };
   }
-  if (player.softDrop()) return { action: 'drop' };
+  if (context.dropCooldown > 0) {
+    context.dropCooldown -= 1;
+    return { action: 'wait' };
+  }
+  if (player.softDrop()) {
+    context.dropCooldown = AI_DROP_INTERVAL_TICKS;
+    return { action: 'drop' };
+  }
   player.lock();
+  context.target = null;
+  context.targetFresh = false;
+  context.dropCooldown = 0;
   return { action: 'lock' };
 }
 
 // Legacy: used by tests that need a complete placement in one call.
 function playBestMove(player, random = Math.random) {
+  const context = createAiContext();
   while (player.alive && player.current?.cells) {
-    const result = aiStep(player, random);
+    const result = aiStep(player, random, context);
     if (!result || result.action === 'dead') { player.alive = false; return null; }
     if (result.action === 'lock') return { x: player.x, y: player.y };
   }
@@ -165,4 +192,14 @@ function createAiPlayer() {
   return player;
 }
 
-module.exports = { chooseBestPlacement, playBestMove, aiStep, stateFromPlayer, applyStateToPlayer, createAiPlayer, boardMetrics };
+module.exports = {
+  chooseBestPlacement,
+  playBestMove,
+  aiStep,
+  createAiContext,
+  AI_DROP_INTERVAL_TICKS,
+  stateFromPlayer,
+  applyStateToPlayer,
+  createAiPlayer,
+  boardMetrics
+};
